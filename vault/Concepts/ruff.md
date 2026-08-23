@@ -79,3 +79,20 @@ The mechanism is `[tool.ruff.lint.per-file-ignores]`. With the currently selecte
 - Two tables, not one: `line-length` is top-level (`[tool.ruff]`) because it affects formatter *and* linter; `select` belongs under `[tool.ruff.lint]`. Ruff moved lint settings into their own table in v0.2, so any blog post showing a top-level `select` is out of date and will emit a deprecation warning.
 - `ruff check` lints, `ruff format` formats — two commands, one binary. `ruff check --fix` applies the auto-fixable subset.
 - Rule *sets* are prefixes (`B`), individual rules are prefix + number (`B006`). Both are valid in `select` and `ignore`.
+
+### Safe vs. unsafe fixes
+
+Observed 2026-08-23 while testing the [[pre-commit]] hook. Ruff classifies every fix as **safe** or **unsafe** and applies only safe ones under `--fix`; the rest are reported with `N hidden fixes can be enabled with the --unsafe-fixes option`.
+
+The criterion is whether the rewrite can change what the program *does*:
+
+| Violation | Fixed? | Why |
+| --- | --- | --- |
+| `F401` unused import | safe, applied | Removing a genuinely unused name cannot alter behaviour. |
+| formatter spacing | applied | Whitespace only. |
+| `F841` unused variable | unsafe, reported | Deleting `result = 1` is harmless, but the same rule fires on `result = charge_credit_card()` — dropping that line removes a side effect. Ruff classifies per rule, not per instance, so the whole rule is unsafe. |
+| `B006` mutable default | unsafe, reported | Rewriting `acc=[]` to `acc=None` + an in-body init changes the public signature; a caller explicitly passing `None`, or code introspecting the default, behaves differently. |
+
+This composes with the pre-commit "fail on modify" decision: safe fixes are applied but still forced through human review before landing, and behaviour-changing fixes are never applied without an explicit opt-in. **Do not put `--unsafe-fixes` in the hook** — run it by hand, deliberately, and read the diff.
+
+Note also the exit codes: `ruff check` exits **1** for findings, while `ruff format` exits **2** for a *tool* error such as a file it cannot parse. A syntax error stops both tools before any lint or format work happens — no parse tree, nothing to fix.

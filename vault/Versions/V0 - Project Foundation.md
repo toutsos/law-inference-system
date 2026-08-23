@@ -67,7 +67,7 @@ Packages are created in the version that first needs them — an empty folder tr
 
 - **uv** (chosen) vs. Poetry vs. pip + requirements.txt — full comparison and command reference in [[uv]].
 - **ruff** for lint + format — rule sets selected, deferred sets, and the reasoning in [[ruff]].
-- **pre-commit** to run ruff (and later other checks) automatically before commits.
+- **pre-commit** to run ruff (and later other checks) automatically before commits — hook model, the `repo: local` vs. mirror-repo version-drift decision, and config in [[pre-commit]].
 - **poethepoet** for task shortcuts (`poe test`, `poe lint`, etc.) instead of a Makefile or raw `uv run` commands everywhere.
 - **pydantic-settings** for typed env-based config vs. `os.environ` reads scattered through the code (untyped, unvalidated, undocumented).
 
