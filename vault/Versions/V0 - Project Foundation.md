@@ -16,12 +16,12 @@ Work through these in order. Commit after each step — small commits with clear
 - [x] **2. Install prerequisites: `uv`, a pinned Python version, git** — _Why:_ `uv` manages both Python versions and dependencies; pinning the interpreter (e.g. via `.python-version`) makes the environment reproducible on any machine. — _See [[uv]]._
 - [x] **3. Initialize the repository properly: first commit, `.gitignore` covering `.env`, `.venv/`, `data/`, caches** — _Why:_ secrets and large corpus files must never enter git history; adding the ignore rules *before* the files exist prevents accidents you can't fully undo.
 - [x] **4. Create the uv project: `pyproject.toml` + lockfile** — _Why:_ PEP 621 metadata plus a lockfile gives deterministic installs; "works on my machine" problems are eliminated at the start, not debugged later. — _See [[uv]]._
-- [ ] **5. Create the folder structure (src layout)** — _Why:_ see the Decision below; the structure encodes the architecture separation from [[Home]] (domain / ingestion / retrieval / LLM / evaluation) so that later versions have an obvious home for their code instead of everything landing in one file. Create only what V0–V1 needs; add packages when a version needs them.
-- [ ] **6. Set up `ruff` (lint + format) with config in `pyproject.toml`** — _Why:_ a single fast tool replaces flake8/black/isort; consistent style from commit one means reviews discuss design, not formatting.
-- [ ] **7. Set up `pre-commit` running ruff** — _Why:_ checks that run automatically are checks that actually run; relying on memory to lint doesn't survive contact with a deadline.
-- [ ] **8. Set up `poethepoet` tasks: `poe test`, `poe lint`, `poe format`** — _Why:_ one memorable command interface that stays stable even when the underlying commands change (later: `poe up` for docker, `poe eval`).
-- [ ] **9. Create the configuration module with Pydantic Settings + `.env.example`** — _Why:_ typed, validated config loaded from environment variables (12-factor style) is the seam through which API keys, model names, and DB URLs will flow in every later version; `.env.example` documents what's needed without leaking values.
-- [ ] **10. Set up `pytest` and write one trivial test (e.g. settings load)** — _Why:_ the test harness must exist before features do, so "write a test" is never a setup task blocking a feature task.
+- [x] **5. Create the folder structure (src layout)** — _Why:_ see the Decision below; the structure encodes the architecture separation from [[Home]] (domain / ingestion / retrieval / LLM / evaluation) so that later versions have an obvious home for their code instead of everything landing in one file. Create only what V0–V1 needs; add packages when a version needs them. — _`domain/` + `llm/` only; see [[Dependency Direction]]._
+- [x] **6. Set up `ruff` (lint + format) with config in `pyproject.toml`** — _Why:_ a single fast tool replaces flake8/black/isort; consistent style from commit one means reviews discuss design, not formatting. — _See [[ruff]]. Outstanding: `exclude = ["vault"]`._
+- [x] **7. Set up `pre-commit` running ruff** — _Why:_ checks that run automatically are checks that actually run; relying on memory to lint doesn't survive contact with a deadline. — _See [[pre-commit]]. Hook verified by making it fail on purpose._
+- [x] **8. Set up `poethepoet` tasks: `poe test`, `poe lint`, `poe format`** — _Why:_ one memorable command interface that stays stable even when the underlying commands change (later: `poe up` for docker, `poe eval`). — _See [[poethepoet]]._
+- [ ] **9. Create the configuration module with Pydantic Settings + `.env.example`** — _Why:_ typed, validated config loaded from environment variables (12-factor style) is the seam through which API keys, model names, and DB URLs will flow in every later version; `.env.example` documents what's needed without leaking values. — **IN PROGRESS:** `pydantic-settings` added to `[project] dependencies`; `config.py`, `.env`, `.env.example` created but **empty**. Design settled in [[Configuration]].
+- [ ] **10. Set up `pytest` and write one trivial test (e.g. settings load)** — _Why:_ the test harness must exist before features do, so "write a test" is never a setup task blocking a feature task. — _pytest installed as a dev dependency; no `tests/`, no test file, no `[tool.pytest.ini_options]` yet._
 - [ ] **11. Define initial domain models: `Law`, `Article`, `Paragraph`, `SourceReference` as Pydantic models** — _Why:_ this forces the first real design conversation — what *is* the structure of Greek legislation? — and gives every later version a shared vocabulary. Expect these models to evolve in [[V2 - Document Ingestion]] and [[V6 - Legal Structure and Citations]]; that's normal.
 - [ ] **12. Choose a small, legally usable sample corpus (3–5 laws)** — _Why:_ a small *fixed* corpus makes every later experiment comparable and every test reproducible. Pick laws relevant to the example use case (e.g. employment law — ν. 4808/2021 territory) so eval questions in [[V4 - Question to Relevant Law]] are natural to write. Verify the source's terms of use.
 
@@ -69,7 +69,7 @@ Packages are created in the version that first needs them — an empty folder tr
 - **ruff** for lint + format — rule sets selected, deferred sets, and the reasoning in [[ruff]].
 - **pre-commit** to run ruff (and later other checks) automatically before commits — hook model, the `repo: local` vs. mirror-repo version-drift decision, and config in [[pre-commit]].
 - **poethepoet** for task shortcuts instead of a Makefile or raw `uv run` commands everywhere — task set, the mutate/report split, and config in [[poethepoet]].
-- **pydantic-settings** for typed env-based config vs. `os.environ` reads scattered through the code (untyped, unvalidated, undocumented).
+- **pydantic-settings** for typed env-based config vs. `os.environ` reads scattered through the code (untyped, unvalidated, undocumented) — what belongs in config, the fail-fast/defaults reasoning, and the deliberately-thin V0 field set in [[Configuration]].
 
 ## Definition of Done (version-specific)
 
@@ -94,5 +94,36 @@ Standing non-goals for V0 regardless of the above:
 ### Technical debt
 
 - Step 1's scope/non-goals are partial (above). Undefended against scope creep until V1.
+- ~~`.DS_Store` tracked in git~~ — fixed 2026-08-23 (`.gitignore` + `git rm --cached`). Note it remains in history; harmless here, but the same mistake with a `.env` would not be.
+- ~~`poe lint` fails on vault Markdown~~ — fixed 2026-08-23 with `exclude = ["vault"]` under `[tool.ruff]`. Cause worth remembering: [[ruff]] formats Python code blocks *inside Markdown*, and the vault deliberately contains anti-pattern snippets (`def collect(item, acc=[])`, a module-level `Settings()`) shown as examples of what *not* to do. Ruff was scanning 29 vault files against 4 real `.py` files.
+
+### `extra="forbid"` demonstrated itself (2026-08-23)
+
+First run of `Settings()` failed:
+
+```
+ValidationError: 1 validation error for Settings
+log_level
+  Extra inputs are not permitted [type=extra_forbidden, input_value='DEBUG']
+```
+
+`.env` declared `LOG_LEVEL=DEBUG` while the model had no `log_level` field yet. The guard did exactly what it was chosen for: refused to start, named the offending key, quoted its value. Under pydantic's default `extra="ignore"` the application would have started **silently** with `LOG_LEVEL` doing nothing — an evening lost wondering why debug logging never appeared. See [[Configuration]].
+
+### Session end — 2026-08-23
+
+Stopping point, so the next session resumes accurately.
+
+**Green:** steps 2–8 committed and verified. Interpreter pinned at 3.12; `domain/` and `llm/` packages import; ruff configured and excluding the vault; pre-commit hook installed *and proven to refuse a bad commit*; poe tasks defined; pytest installed and resolving from the venv (after the PATH-fallthrough bug in [[poethepoet]]).
+
+**Step 9 nearly done.** `pydantic-settings` in `[project] dependencies`; `config.py` has `Settings` with `app_env` and `extra="forbid"`; `.env` and `.env.example` written.
+
+**Pick up here, in order:**
+
+1. ~~Add `log_level`~~ — done. `uv run python -c "from greek_law.config import Settings; print(Settings().model_dump())"` returns `{'app_env': 'local', 'log_level': 'DEBUG'}`. `DEBUG` rather than the `"INFO"` default proves the `.env` is genuinely read. Precedence is: real environment variable → `.env` → field default, which is what lets identical code run on a server with no `.env` at all.
+2. `uv run poe format` — `config.py` trips `I001` (one blank line after the import block, PEP 8 wants two). It reached the working tree because the file is untracked, so the [[pre-commit]] hook has never seen it: hooks only inspect what is staged.
+3. Commit everything, confirm `poe lint` green.
+4. **Open design question:** `log_level: str` accepts `"BANANA"`; `app_env: str` accepts `"prodd"` — a typo that silently selects production-shaped behaviour. `Literal["DEBUG","INFO","WARNING","ERROR"]` turns that into the same loud startup failure demonstrated above. Worth it for both fields, one, or neither? Real cost: every new valid value becomes a code change.
+5. Step 10: `tests/`, `[tool.pytest.ini_options]`, and the throwaway required-field test satisfying the "fails loudly" Definition of Done item (see [[Configuration]]).
+6. Steps 11–12 are real design conversations — the structure of Greek legislation, and which 3–5 laws.
 
 _Freeform notes, gotchas, links, technical debt._

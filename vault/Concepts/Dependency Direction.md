@@ -63,4 +63,24 @@ If enforcement ever needs teeth, ruff's `flake8-tidy-imports` banned-API rules c
 ## Notes
 
 - The rule constrains **imports**, not knowledge. `llm/` is entitled to know a lot about `domain/`; that is what the arrow means.
+
+### Worked case: may `domain/` import `config.py`? (2026-08-23)
+
+**No.** Answered "yes" on first pass and corrected — worth recording, because the reasoning generalises.
+
+`config.py` reads environment variables and files: it is I/O, and therefore infrastructure, and therefore on the outside of the arrow. The concrete failure:
+
+```python
+# src/greek_law/domain/law.py
+from greek_law.config import Settings
+settings = Settings()          # runs at import time
+```
+
+`import greek_law.domain` now **validates the environment**. Domain tests — the ones defined as needing no infrastructure — fail on any machine without a `.env`: CI, a fresh clone, a colleague. And the error talks about a missing environment variable while the test was about what an article number looks like.
+
+The stated check applies unchanged: *deleting the outer package would leave `domain/` importable and its tests passing.* It must pass for `config.py` too.
+
+**The fix when a domain function genuinely needs a configurable value:** the caller passes it as an argument — `chunk_text(text, size)`, not `chunk_text(text)` reaching for a global. The value is read from config at the outer edge and travels inward as a plain parameter. The domain stays a pure function of its inputs, which is the same property that keeps it testable.
+
+Placement: `config.py` lives at `src/greek_law/config.py`, outside `domain/`. `llm/`, `ingestion/`, and `retrieval/` may import it; `domain/` may not.
 - Watch for the subtle violation: putting something in `domain/` that only exists to serve one adapter (a field shaped for the vector store, a method the prompt template needs). It compiles, imports cleanly, and still couples the core to infrastructure. The test is whether the concept would still make sense to a lawyer.
