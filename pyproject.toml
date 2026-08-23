@@ -15,7 +15,9 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "poethepoet>=0.48.0",
     "pre-commit>=4.6.2",
+    "pytest>=9.1.1",
     "ruff>=0.16.4",
 ]
 
@@ -24,3 +26,18 @@ line-length = 88
 
 [tool.ruff.lint]
 select = ["E4","E7","E9","F","I","UP","B","N"]
+
+
+
+[tool.poe.tasks]
+test = "python -m pytest"
+
+[tool.poe.tasks.lint]
+help = "Report lint and formatting problems; changes nothing"
+sequence = ["ruff check .", "ruff format --check ."]
+default_item_type = "cmd"
+
+[tool.poe.tasks.format]
+help = "Apply safe lint fixes and reformat"
+sequence = ["ruff check --fix .", "ruff format ."]
+default_item_type = "cmd"
