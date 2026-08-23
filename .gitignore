@@ -1,2 +1,9 @@
 vault/.obsidian/workspace.json
 vault/.obsidian/workspace-mobile.json
+.venv/
+__pycache__/
+*.py[cod]
+.env
+data/
+.pytest_cache/
+.ruff_cache/
