@@ -1,6 +1,6 @@
 Part of [[Home]]. See [[Agent Instructions]] for how decisions/tools/checklist should be maintained.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ## Goal
 
@@ -12,10 +12,10 @@ Build the development skeleton before writing any AI code: repository, dependenc
 
 Work through these in order. Commit after each step — small commits with clear messages are part of the discipline being practiced.
 
-- [ ] **1. Define initial scope and non-goals** — _Why:_ writing down what V0–V3 will *not* do (no UI, no HTTP API, no full corpus, no agents) is the cheapest defense against scope creep. Record them in this note under Notes.
-- [ ] **2. Install prerequisites: `uv`, a pinned Python version, git** — _Why:_ `uv` manages both Python versions and dependencies; pinning the interpreter (e.g. via `.python-version`) makes the environment reproducible on any machine.
-- [ ] **3. Initialize the repository properly: first commit, `.gitignore` covering `.env`, `.venv/`, `data/`, caches** — _Why:_ secrets and large corpus files must never enter git history; adding the ignore rules *before* the files exist prevents accidents you can't fully undo.
-- [ ] **4. Create the uv project: `pyproject.toml` + lockfile** — _Why:_ PEP 621 metadata plus a lockfile gives deterministic installs; "works on my machine" problems are eliminated at the start, not debugged later.
+- [x] **1. Define initial scope and non-goals** — _Why:_ writing down what V0–V3 will *not* do (no UI, no HTTP API, no full corpus, no agents) is the cheapest defense against scope creep. Record them in this note under Notes. — _Deliberately deferred, see Notes._
+- [x] **2. Install prerequisites: `uv`, a pinned Python version, git** — _Why:_ `uv` manages both Python versions and dependencies; pinning the interpreter (e.g. via `.python-version`) makes the environment reproducible on any machine. — _See [[uv]]._
+- [x] **3. Initialize the repository properly: first commit, `.gitignore` covering `.env`, `.venv/`, `data/`, caches** — _Why:_ secrets and large corpus files must never enter git history; adding the ignore rules *before* the files exist prevents accidents you can't fully undo.
+- [x] **4. Create the uv project: `pyproject.toml` + lockfile** — _Why:_ PEP 621 metadata plus a lockfile gives deterministic installs; "works on my machine" problems are eliminated at the start, not debugged later. — _See [[uv]]._
 - [ ] **5. Create the folder structure (src layout)** — _Why:_ see the Decision below; the structure encodes the architecture separation from [[Home]] (domain / ingestion / retrieval / LLM / evaluation) so that later versions have an obvious home for their code instead of everything landing in one file. Create only what V0–V1 needs; add packages when a version needs them.
 - [ ] **6. Set up `ruff` (lint + format) with config in `pyproject.toml`** — _Why:_ a single fast tool replaces flake8/black/isort; consistent style from commit one means reviews discuss design, not formatting.
 - [ ] **7. Set up `pre-commit` running ruff** — _Why:_ checks that run automatically are checks that actually run; relying on memory to lint doesn't survive contact with a deadline.
@@ -47,6 +47,8 @@ greek-laws/
 └── docker/                    # V3+: compose files for local infra
 ```
 
+The `greek-laws/` above **is the repository root** (`Greek_Laws_project/`), not a nested directory — `pyproject.toml`, `src/`, and `tests/` sit beside `vault/`.
+
 Packages are created in the version that first needs them — an empty folder tree invites speculative code.
 
 ## Decisions
@@ -56,11 +58,13 @@ Packages are created in the version that first needs them — an empty folder tr
 - **2026-08-22:** Set up **ruff + pre-commit** from V0, not deferred to V12 — cheap now, and catches issues while the codebase is still small.
 - **2026-08-22:** Docker/docker-compose for local infrastructure (e.g. Postgres/pgvector) is explicitly **deferred to [[V3 - First RAG System]]**, when a vector store is first needed — V0-V2 have no service dependency to containerize. See V3's Decisions.
 - **2026-08-22:** **src layout with one package per architectural concern** (domain, llm, ingestion, retrieval, evaluation), not a flat module layout. Src layout prevents accidentally importing the package from the working directory instead of the installed environment (a classic source of "works locally, breaks in CI"), and the package boundaries mirror the architecture evolution in [[Home]] — so when a version says "add hybrid retrieval," the code has one obvious place to go, and coupling between layers stays visible in the imports. Alternative considered: single flat package until it hurts — rejected because the target architecture is already known and the cost of starting structured is near zero.
+- **2026-08-23:** **Python pinned to 3.12** via `.python-version`. Everything in the tech direction from [[Home]] (psycopg 3, pgvector, FastAPI, pydantic v2) is mature on 3.12; 3.13's free-threading and JIT work offers this project nothing it needs. Alternative considered: 3.13 — rejected as risk without benefit. Cheap to change now, expensive once dependencies are locked against it.
+- **2026-08-23:** **`uv init --lib`, not `--app`.** `--lib` produces the src layout *and* a real `[build-system]`, which makes the project installable into its own virtualenv — that is what allows `import greek_law` to resolve from `tests/` without `sys.path` manipulation. `--app` would have given a loose script project importable only from its own directory. Details in [[uv]].
 - **2026-08-22:** **Domain models are pure data (Pydantic), free of I/O and framework imports.** This keeps the heart of the application understandable and testable without any infrastructure — the "keep domain logic understandable" objective from [[Home]] made concrete.
 
 ## Tools & Alternatives Considered
 
-- **uv** (chosen) vs. Poetry (used by the reference project; mature but slower, older resolver) vs. pip + requirements.txt (simplest, no real lockfile discipline without pip-tools).
+- **uv** (chosen) vs. Poetry vs. pip + requirements.txt — full comparison and command reference in [[uv]].
 - **ruff** for lint + format (single fast tool, replaces flake8/black/isort).
 - **pre-commit** to run ruff (and later other checks) automatically before commits.
 - **poethepoet** for task shortcuts (`poe test`, `poe lint`, etc.) instead of a Makefile or raw `uv run` commands everywhere.
@@ -74,5 +78,20 @@ Packages are created in the version that first needs them — an empty folder tr
 - Sample corpus chosen and documented (source, terms, which laws) — files may be downloaded in [[V2 - Document Ingestion]].
 
 ## Notes
+
+### Scope and non-goals (Step 1)
+
+**2026-08-23 — deliberately left open.** Asked what the smallest demoable V0–V3 result would be, the answer was "not sure yet; get everything set up and understand what is happening." That is an honest position at V0 and it was recorded rather than invented — but it is an *accepted gap*, not a completed step. Revisit at the start of [[V1 - Minimal LLM Application]], when there is enough feel for the system to define a target that means something.
+
+Standing non-goals for V0 regardless of the above:
+
+- No LLM calls (that is V1).
+- No HTTP/API layer — see the V1 decision deferring FastAPI.
+- No corpus files downloaded or parsed (that is [[V2 - Document Ingestion]]); V0 only *chooses* the corpus.
+- No `ingestion/`, `retrieval/`, or `evaluation/` packages created before the version that needs them.
+
+### Technical debt
+
+- Step 1's scope/non-goals are partial (above). Undefended against scope creep until V1.
 
 _Freeform notes, gotchas, links, technical debt._

@@ -23,6 +23,9 @@ The smallest useful LLM application: a question goes in, a prompt is built, an L
 
 ## Decisions
 
+- **2026-08-23:** **Ollama (local) is the first `LLMClient` implementation; a hosted provider follows second.** Learner's rationale: free, offline, no API key to manage, and having a genuinely different second implementation is what proves the seam is a seam rather than a wrapper shaped like one vendor's SDK.
+  - _Counter-risk recorded at decision time:_ a small local model's quality on Greek legal text is likely poor. Until a hosted implementation exists for comparison, a bad answer cannot be attributed between *the model* and *the retrieval* — which is exactly the attribution that step 10's baseline and [[V3 - First RAG System]]'s justification depend on. **Mitigation:** re-run the step 10 no-RAG baseline against the hosted provider once it exists, and treat the local-only baseline as provisional until then.
+  - _Effect on step 1:_ the provider choice is now partly pre-decided. The comparison work shifts to (a) which local model to run under Ollama — size vs. Greek-language competence vs. what the machine can actually hold — and (b) which hosted provider comes second, chosen partly for being *unlike* Ollama in its API shape, since a seam validated against two similar APIs is not validated.
 - **2026-08-22:** Defer introducing FastAPI/HTTP API layer. V1 (and subsequent versions) expose the application as plain Python functions/a CLI until a concrete need for an external-facing interface arises (e.g. when tools/agents in [[V8 - Tools and Structured Operations]] or later need to be called externally). Avoids HTTP plumbing distracting from the LLM/RAG concepts being learned first.
 - **2026-08-22:** V1 ends with a **recorded no-RAG baseline** (step 10). Every architectural addition in this project should be justified by an observed failure or measurement, not by fashion — this baseline is the first instance of that discipline.
 
@@ -38,5 +41,10 @@ _To fill during the version: provider comparison (capabilities on Greek, pricing
 - The no-RAG baseline answers are saved in the repo (or linked here) with hallucinations annotated.
 
 ## Notes
+
+### Technical debt
+
+- **Seam unproven with a single implementation.** An interface with one implementation is a guess about what varies. It stays a guess until the hosted provider lands — expect the `LLMClient` interface to change when it does, and treat that change as the design working, not failing.
+- **Provisional baseline.** Step 10's no-RAG answers are provisional while only the local model exists (see the 2026-08-23 decision).
 
 _Freeform notes, gotchas, links, technical debt._
