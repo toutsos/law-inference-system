@@ -66,7 +66,7 @@ Packages are created in the version that first needs them — an empty folder tr
 ## Tools & Alternatives Considered
 
 - **uv** (chosen) vs. Poetry vs. pip + requirements.txt — full comparison and command reference in [[uv]].
-- **ruff** for lint + format (single fast tool, replaces flake8/black/isort).
+- **ruff** for lint + format — rule sets selected, deferred sets, and the reasoning in [[ruff]].
 - **pre-commit** to run ruff (and later other checks) automatically before commits.
 - **poethepoet** for task shortcuts (`poe test`, `poe lint`, etc.) instead of a Makefile or raw `uv run` commands everywhere.
 - **pydantic-settings** for typed env-based config vs. `os.environ` reads scattered through the code (untyped, unvalidated, undocumented).
