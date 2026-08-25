@@ -54,7 +54,13 @@ Fields at V0: `app_env` (default `"local"`) and `log_level` (default `"INFO"`). 
 
 Why this is not the same mistake as creating an empty `retrieval/` package (see V0's step 5 decision): an empty package would invite designing an interface for an unseen problem. Here there is nothing to design — 12-factor config is a solved shape, and it is two fields, not an architecture. It is also needed in the *next* version, not five later: V1 step 2 is "wire the API key through Pydantic Settings." Introducing the config pattern now means V1 adds a field to something that already works, rather than learning two new things at once.
 
-**Known tension:** V0's Definition of Done requires "a missing required variable fails loudly with a clear error", but no genuinely required variable exists yet, and inventing one to satisfy the checklist would be exactly the speculative config argued against above. **Resolution:** prove the behaviour in a *test* — define a throwaway settings model with a required field inside the test and assert it raises. Real coverage of the mechanism, no fake field in production code. V1 brings the first real required variable.
+**Known tension:** V0's Definition of Done requires "a missing required variable fails loudly with a clear error", but no genuinely required variable exists yet, and inventing one to satisfy the checklist would be exactly the speculative config argued against above. **Resolution:** demonstrate the behaviour in a *test* — a throwaway `ProbeSettings(BaseSettings)` with one required field, declared inside the test function, asserted to raise. No fake field in production code.
+
+**Be honest about what that test is (2026-08-25).** `test_missing_required_setting_fails_loudly` tests **pydantic-settings, not this project's code**. That a field without a default is required, and that constructing it without a value raises, are both pydantic behaviours, exhaustively covered by its maintainers. Contrast the other three config tests, each of which covers a decision made *here*: `extra="forbid"` is a line someone could delete, `Literal[...]` is a chosen constraint, the env-var override exercises a field name that must match `.env.example`.
+
+By the project's own rule — *a test earns its place if it can fail for a reason worth knowing about* — it barely qualifies; its only real value is catching a pydantic behaviour change on a major upgrade. It is an **executable demonstration**, present so the Definition of Done is not a lie.
+
+**Delete it in [[V1 - Minimal LLM Application]]**, once `llm_api_key` is genuinely required: write the real test against `Settings` itself and drop `ProbeSettings`. Then it covers actual wiring — that the field is required, and that its name maps to the variable documented in `.env.example`.
 
 ## pydantic-settings specifics
 
@@ -62,7 +68,48 @@ A **runtime** dependency (`[project] dependencies`), not a dev one — applicati
 
 - `BaseSettings` — a Pydantic model populated from environment variables rather than constructor arguments. Field `app_env` reads `APP_ENV` (case-insensitive by default).
 - `env_file=".env"` — also read that file when present. **Real environment variables take precedence over `.env`**, which is what lets identical code run in production where no `.env` exists.
-- `extra="forbid"` — rejects unknown keys. Guards the rename case: a variable is renamed, `.env` still carries the old name, and without `forbid` the application starts silently on defaults. Cost: any unrelated variable in `.env` breaks startup.
+
+#### Sources and precedence
+
+`.env` **the file** and **the environment** are different sources — a distinction that causes real confusion. `Settings()` consults several, highest priority first:
+
+| # | Source | What it is |
+| --- | --- | --- |
+| 1 | arguments to `Settings(...)` | `Settings(log_level="ERROR")` |
+| 2 | `os.environ` | the process's real environment variables |
+| 3 | the `.env` file | a text file pydantic-settings parses |
+| 4 | field defaults | `log_level: Literal[...] = "INFO"` |
+
+**Resolution is per field, not per object.** For *each field independently*, pydantic walks 1 → 4 and takes the first source that has a value for it. One settings object is routinely assembled from several sources at once — which is precisely what lets production override only `LLM_API_KEY` while everything else keeps its default.
+
+Verified 2026-08-25: with `LOG_LEVEL` set in the environment and `_env_file=None`, the result is `{'app_env': 'local', 'log_level': 'ERROR'}` — `log_level` from source 2, `app_env` from source 4.
+
+Confirmed earlier by direct experiment: `LOG_LEVEL=WARNING uv run python -c ...` yields `WARNING` while `.env` says `DEBUG`.
+
+#### Consequences for tests
+
+- `Settings(_env_file=None)` disables **source 3 only**. Sources 2 and 4 remain live, which is why a test using `monkeypatch.setenv` still gets values. It also makes the test resemble production, where no `.env` exists at all.
+- `_env_file=None` closes the *file* leak but not the *environment* leak: a variable exported in the developer's shell is still read (demonstrated — an exported `APP_ENV=prod` reaches the object). Hence:
+
+> A field the test **cares about** must be explicitly set or explicitly deleted. A field it does not care about may be left to default.
+
+That is why a test asserting a *missing* variable fails loudly must call `monkeypatch.delenv(name, raising=False)` first — otherwise, if the variable happens to exist in the shell, the test passes without testing anything.
+- `extra="forbid"` — rejects unknown keys. Guards the rename case: a variable is renamed, `.env` still carries the old name, and without `forbid` the application starts silently on defaults. Cost: any unrelated variable in `.env` breaks startup. **Narrower than it looks — see below.**
+
+#### `extra="forbid"` covers `.env`, not real environment variables (verified 2026-08-25)
+
+Measured directly, both cases:
+
+```
+stray real environment variable  ->  NO error
+stray key in a .env file         ->  ValidationError
+```
+
+Cause is the two settings sources. `EnvSettingsSource` walks the **declared fields** and looks each up in `os.environ` — it never enumerates the environment, so an unknown variable is invisible and there is nothing to forbid. `DotEnvSettingsSource` parses the **whole file**, then compares the keys found against the fields and raises on the leftovers.
+
+Consequence: the guard protects the file where a typo is realistically made, and gives **nothing** against a mistyped `export` or a wrong variable name in CI or production — which is exactly where no `.env` exists. Worth keeping; just know the edge.
+
+Practical effect on tests: a test for this behaviour must write a real `.env` file (`tmp_path`), not use `monkeypatch.setenv`.
 - `.env.example` is committed and lists every variable with a placeholder — the only documentation of what the application requires. `.env` itself stays git-ignored (V0 step 3).
 
 ## Alternatives considered

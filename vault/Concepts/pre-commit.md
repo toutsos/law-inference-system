@@ -93,7 +93,25 @@ repos:
 
 ## Notes
 
-- `pre-commit install` is the step people skip; without it `.pre-commit-config.yaml` is inert. Reading the generated `.git/hooks/pre-commit` afterwards makes the mechanism click.
+### Hook vs. `poe lint` — division of labour
+
+Asked 2026-08-23: *if the hook runs ruff, why run `poe format && poe lint` manually?* Answer: for an ordinary commit, **you don't** — just commit and let the hook work. It fixes what it can, fails the commit (as decided above), and you re-stage and commit again. Running `poe format` first only means the *first* attempt succeeds; same destination, one round instead of two.
+
+They are not fully interchangeable, though:
+
+| | Runs | Scope | Mutates |
+| --- | --- | --- | --- |
+| pre-commit hook | automatically, on commit | **staged files only** | yes |
+| `poe lint` | when chosen, and in CI | **whole repo** | no |
+
+Three cases where `poe lint` is not redundant:
+
+1. **Scope.** The hook never sees files you are not committing. After adding a rule set, long-committed files have never been checked against it — hence `pre-commit run --all-files`.
+2. **Unsafe fixes.** The hook runs the mutating commands, but ruff never applies unsafe fixes (`B006`, `F841` — see [[ruff]]). When one fires, the hook simply fails and leaves the work to a human; `poe lint` surfaces that before a commit message has been composed.
+3. **CI parity.** `poe lint` is literally what CI runs, so locally it is a preview of that verdict. The hook is bypassable with `--no-verify`; CI is not.
+
+- `pre-commit install` is the step people skip; without it `.pre-commit-config.yaml` is inert.
+- Hooks only inspect **staged** content. A file that is untracked or unstaged has never been through them — which is how `config.py` reached the working tree carrying an `I001` violation. Reading the generated `.git/hooks/pre-commit` afterwards makes the mechanism click.
 - `git commit --no-verify` bypasses all hooks. Useful in genuine emergencies, and the reason CI must run the same checks.
 - Verify a hook by **making it fail on purpose**. A hook that has never refused anything has not been shown to work.
 - Candidate for later, if corpus files ever threaten to reach git: `check-added-large-files` from `pre-commit/pre-commit-hooks`, guarding the "no data in git history" rule from V0 step 3. Not added yet — `data/` is already git-ignored.

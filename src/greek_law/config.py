@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -8,5 +10,5 @@ class Settings(BaseSettings):
         extra="forbid",
     )
 
-    app_env: str = "local"
-    log_level: str = "INFO"
+    app_env: Literal["local", "ci", "prod"] = "local"
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
