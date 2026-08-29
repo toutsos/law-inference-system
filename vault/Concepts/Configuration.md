@@ -30,11 +30,42 @@ Derived 2026-08-23 by sorting concrete candidates.
 | Log level | config | `DEBUG` locally, `INFO` in production. |
 | System prompt text | **code** | Prompts are code — they need diff history and regression tests ([[V1 - Minimal LLM Application]] step 6). |
 | Corpus law list | **code** | A fixed research artifact; V0 step 12 wants it *fixed* so experiments stay comparable. |
+| Request timeout | config | Rule 1 passes: 30s on an M1 Max vs. longer in CI on shared hardware is a real environment difference. |
+| Temperature | **code** (call parameter) | Added 2026-08-29 by applying the two rules. Rule 1: nobody wants a laptop at 0.2 and production at 0.9 running the same code — it does not vary by environment, it is merely undecided. Rule 2: changing it makes every prior answer-quality measurement incomparable, exactly as with chunk size. And it is not *one* value — extracting a citation wants ~0 while rephrasing a question may want 0.7, so a single global setting makes both impossible. Belongs as a per-call parameter with a code-defined default. |
 | Chunk size | **code** | The instructive case — see below. |
 
 **Chunk size** is where the rules bite. There is no world in which a laptop deliberately chunks at 500 tokens while production chunks at 800; it is the same decision everywhere, merely undecided. And it is a *retrieval quality parameter*: changing it makes the entire vector index stale, and since [[V4 - Question to Relevant Law]] measures Recall@K and [[V7 - Evaluation Framework]] tracks regressions, an `.env`-resident chunk size lets a laptop and CI silently disagree — **two eval runs stop being comparable with nothing reporting a difference.** Numbers that cannot be trusted are worse than no numbers.
 
 The same reasoning covers embedding model, `top_k`, and similarity thresholds in [[V3 - First RAG System]]–[[V5 - Hybrid Retrieval]]: experiment parameters belong in git, next to the results they produced.
+
+## `extra="forbid"` has now caught two real mistakes
+
+Not a hypothetical guard — it has refused to start twice, and both times named the offending key and quoted its value:
+
+1. **2026-08-23** — `.env` declared `LOG_LEVEL=DEBUG` before the field existed. See [[V0 - Project Foundation]].
+2. **2026-08-29** — `.env` declared `requests_timeout=30` while `Settings` had no such field, during [[V1 - Minimal LLM Application]] step 2.
+
+Both are the same shape: **the `.env` and the model drifted apart.** The failure mode being prevented is a configuration key that appears to be set and does nothing — the kind of thing that costs an evening because the evidence (`it's right there in .env`) contradicts the behaviour. Under pydantic's default `extra="ignore"` both would have started silently.
+
+## `.env` file format: keep it shell-sourceable
+
+**Uppercase keys, no spaces around `=`.**
+
+```
+OLLAMA_BASE_URL=http://localhost:11434     # ✅
+ollama_base_url = http://localhost:11434   # ✗ works in Python, breaks everywhere else
+```
+
+pydantic-settings tolerates the second form — it matches env vars case-insensitively, and python-dotenv strips whitespace around `=`. So it loads correctly and looks fine.
+
+It stops being fine the moment anything other than Python reads the file:
+
+```
+$ sh -c '. ./.env'
+./.env: line 7: ollama_base_url: command not found
+```
+
+`docker-compose` takes an `env_file:` ([[V3 - First RAG System]] introduces it), CI runners source these files, and `export $(cat .env | xargs)` is a common idiom. A `.env` that only pydantic can read is a `.env` that will fail silently or loudly in the next environment that touches it. The uppercase-no-spaces convention costs nothing and keeps the file portable.
 
 ## When to fail, and the danger of defaults
 

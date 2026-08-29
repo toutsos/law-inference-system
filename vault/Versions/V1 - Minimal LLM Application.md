@@ -11,7 +11,7 @@ The smallest useful LLM application: a question goes in, a prompt is built, an L
 ## Steps
 
 - [x] **1. Choose the LLM provider and model; record pricing** — _Why:_ this is the project's first real technology decision — compare at least two options (capability on Greek text, cost per million tokens, structured-output support, rate limits) and record the choice below. Nothing else in this version can start without it. — _Done 2026-08-29: Ollama + `ilsp/llama-krikri-8b-instruct`. No pricing to record (local inference); the cost axis becomes latency and tokens/second, see the Decisions below. Comparison against a larger general model deferred — logged as debt._
-- [ ] **2. Wire the API key through Pydantic Settings** — _Why:_ the config seam from [[V0 - Project Foundation]] exists precisely for this; the key lives in `.env`, never in code, never in git.
+- [~] **2. Wire the model config through Pydantic Settings** _(no API key — Ollama needs none)_ — _Why:_ the config seam from [[V0 - Project Foundation]] exists precisely for this; the key lives in `.env`, never in code, never in git. With a local provider there is no secret, so what is being wired is *where the server is* and *which model to call*. — **IN PROGRESS 2026-08-29:** `ollama_base_url` and `ollama_model` added; `request_timeout` still missing from `Settings` while present in `.env`, so `Settings()` currently raises. See the session note below.
 - [ ] **3. Learn the raw API first: one throwaway script calling the SDK directly** — _Why:_ before wrapping anything, see what a request/response actually contains — messages, roles, token counts, finish reasons. Abstractions are only understandable after the thing they abstract.
 - [ ] **4. Design a thin `LLMClient` interface and implement it for the chosen provider** — _Why:_ a seam you own means the provider can be swapped, calls can be faked in tests, and cross-cutting concerns (logging, retries, cost tracking) have one home. Keep it thin — a leaky wrapper that re-exposes the whole SDK teaches nothing and protects nothing.
 - [ ] **5. Define Pydantic request/response models for the application boundary** — _Why:_ `answer_question(Question) -> Answer` with typed models is the contract every later version extends (V3 adds sources, V6 adds citations); starting typed avoids a painful retrofit.
@@ -44,6 +44,24 @@ _To fill during the version: provider comparison (capabilities on Greek, pricing
 - The no-RAG baseline answers are saved in the repo (or linked here) with hallucinations annotated.
 
 ## Notes
+
+### Session end — 2026-08-29
+
+**Done today:** V0 closed and committed. V1 started — step 1 settled (Ollama + Krikri), first no-RAG probe recorded below, step 2 partially done.
+
+**Step 2 decision, settled by applying the rules in [[Configuration]]:** `ollama_base_url`, `ollama_model` and `request_timeout` go in `Settings`; **temperature and the system prompt do not.** The learner's initial position was that all five belong in config. The counter-argument that settled it was the learner's own note: the system prompt is already listed there with verdict *code*, and `.env` is gitignored — a prompt living there would have no diff history, never appear in review, differ silently per machine, and be untestable by [[V7 - Evaluation Framework]]. Temperature was genuinely open and is now recorded in that note as a derived case: it does not vary by *environment*, it varies by *call site*.
+
+The general shape worth carrying forward: **config varies by where the code runs; parameters vary by what the call is doing; experiment settings live in git next to the results they produced.**
+
+**Pick up here, in order:**
+
+1. **`Settings()` currently raises** — `.env` and `.env.example` declare `requests_timeout=30`, but `Settings` has no such field, so `extra="forbid"` refuses to start. Add the field as **`request_timeout: float = 30`** (singular — it is one request's timeout; float because HTTP clients take fractional seconds) and rename the key in both `.env` files to match.
+2. **Fix the `.env` format** — the three new lines use lowercase keys with spaces around `=`. It loads in Python but the file is no longer shell-sourceable (`sh -c '. ./.env'` → `command not found`), which breaks the `env_file:` that docker-compose needs in [[V3 - First RAG System]]. Convention and reasoning now recorded in [[Configuration]].
+3. **Add the missing test** — step 2 asked for one; copy `test_env_var_overrides_default` and point it at `OLLAMA_MODEL`. Worth having specifically because the model name is the knob that gets flipped for the deferred Qwen comparison.
+4. Then `uv run poe format && uv run poe lint && uv run poe test`, and commit.
+5. **Step 3** — a throwaway script calling Ollama's HTTP API directly (`POST /api/chat`), to see a raw request and response before wrapping anything. Abstractions are only understandable after the thing they abstract.
+
+**Already correct, no action needed:** `Literal` types on `app_env` and `log_level` — this closes the open design question left in [[V0 - Project Foundation]]'s 2026-08-23 note. Sensible defaults on all new fields, and `.env.example` carrying real working values rather than placeholders.
 
 ### First probe of the baseline — 2026-08-29
 
