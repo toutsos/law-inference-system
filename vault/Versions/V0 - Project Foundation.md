@@ -1,6 +1,6 @@
 Part of [[Home]]. See [[Agent Instructions]] for how decisions/tools/checklist should be maintained.
 
-**Status:** In Progress
+**Status:** Complete — 2026-08-29
 
 ## Goal
 
@@ -23,7 +23,7 @@ Work through these in order. Commit after each step — small commits with clear
 - [x] **9. Create the configuration module with Pydantic Settings + `.env.example`** — _Why:_ typed, validated config loaded from environment variables (12-factor style) is the seam through which API keys, model names, and DB URLs will flow in every later version; `.env.example` documents what's needed without leaking values. — _Done 2026-08-23: `Settings` with `app_env` + `log_level`, `extra="forbid"`, `.env.example` written. Design and field-set reasoning in [[Configuration]]._
 - [x] **10. Set up `pytest` and write one trivial test (e.g. settings load)** — _Why:_ the test harness must exist before features do, so "write a test" is never a setup task blocking a feature task. — _Four tests in `tests/test_config.py`, all passing. See [[Configuration]] for what each covers and why the fourth is a placeholder to delete in V1._
 - [x] **11. Define initial domain models: `Act`, `Article`, `Paragraph`, `Case`, `StructuralUnit`, `SourceReference` as Pydantic models** — _Why:_ this forces the first real design conversation — what *is* the structure of Greek legislation? — and gives every later version a shared vocabulary. Expect these models to evolve in [[V2 - Document Ingestion]] and [[V6 - Legal Structure and Citations]]; that's normal. — _Done 2026-08-29: six models, one file per model in `src/greek_law/domain/`, 15 tests. Design per [[Greek Legislation Structure]]; deviations recorded in Decisions below._
-- [ ] **12. Choose a small, legally usable sample corpus (3–5 laws)** — _Why:_ a small *fixed* corpus makes every later experiment comparable and every test reproducible. Pick laws relevant to the example use case (e.g. employment law — ν. 4808/2021 territory) so eval questions in [[V4 - Question to Relevant Law]] are natural to write. Verify the source's terms of use.
+- [x] **12. Choose a small, legally usable sample corpus (3–5 laws)** — _Why:_ a small *fixed* corpus makes every later experiment comparable and every test reproducible. Pick laws relevant to the example use case (e.g. employment law — ν. 4808/2021 territory) so eval questions in [[V4 - Question to Relevant Law]] are natural to write. Verify the source's terms of use. — _Done 2026-08-29: **π.δ. 62/2025, «Κώδικας Εργατικού Δικαίου» (ΦΕΚ Α΄ 121/11.07.2025), Βιβλίο Πρώτο**, fetched from `search.et.gr`. Licensing settled in [[Corpus Sourcing and Licensing]]; choice reasoned in the Decision below._
 
 ## Proposed Folder Structure
 
@@ -73,12 +73,21 @@ Packages are created in the version that first needs them — an empty folder tr
 - **2026-08-29:** **`frozen=True` on all six domain models.** Not adopted on principle — adopted after the aliasing failure was demonstrated: the V2 parser shares one `StructuralUnit` across every article in a chapter, so a mutable model lets an edit through one article silently corrupt the rest. Full reasoning, alternatives, and the cost to V2's parser in [[Immutable Domain Models]].
 - **2026-08-29:** **`Article.path` is a materialized path**, not a nested container tree. The ordered list encodes containment (`[Μέρος Α΄, Κεφάλαιο Α΄]` = chapter inside part), and the tree is reconstructable by grouping on path prefixes — demonstrated, no information lost. Chosen because chapter numbering *restarts* inside each Μέρος in real laws, so a single `chapter` field could not distinguish Μέρος Α΄ › Κεφάλαιο Α΄ from Μέρος Β΄ › Κεφάλαιο Α΄, and because the dominant access pattern (retrieval hands back one provision needing its breadcrumb for prompt context) is a field read here versus a tree walk otherwise. Alternatives: a class per container level (depth fixed at design time) and a recursive `Division` node (articles stop being a flat list). Accepted cost: container titles are denormalized across articles — safe only because the V2 parser is the single writer.
 
+- **2026-08-29:** **Corpus: π.δ. 62/2025 «Κώδικας Εργατικού Δικαίου» (ΦΕΚ Α΄ 121/11.07.2025), Βιβλίο Πρώτο — Ατομικό Εργατικό Δίκαιο.** One act rather than 3–5, chosen deliberately:
+    - **It is consolidated.** A κώδικας gathers scattered provisions into one current text, so V0–V3 need not model amendment chains — the thing [[Greek Legislation Structure]] explicitly defers to [[V6 - Legal Structure and Citations]].
+    - **Overlap would poison retrieval.** The obvious companion, ν. 4808/2021, is *codified into* this Code; ingesting both would place near-duplicate text in the vector store, yielding duplicate hits and two competing citations for one rule. Non-overlap matters more than act count.
+    - **It covers the use case in [[Home]] directly** — termination, notice, severance — so eval questions in [[V4 - Question to Relevant Law]] write themselves.
+    - **Accepted weakness:** "which law is relevant?" is trivial with a single act. Mitigation: add a second, non-overlapping act in V4, when a working parser makes the second one cheap and cross-act retrieval is what is being measured.
+- **2026-08-29:** **Rejected π.δ. 80/2022** «Κώδικας Ατομικού Εργατικού Δικαίου» — the obvious pick, and **repealed on 11.07.2025** by π.δ. 62/2025. Most search results and legal blogs still point at it. This is trap 3 of [[Greek Legislation Structure]] (temporal validity) firing before a single line of ingestion code exists: the system would have produced a well-formed citation to repealed law. Recorded because the lesson generalizes — *currency of a source is part of choosing it, not a later concern.*
+- **2026-08-29:** **Ingest only from the official source** (`search.et.gr`), never from kodiko.gr / e-nomothesia.gr / lawspot.gr, despite those being far easier to scrape. The statutory text is uncopyrighted, but an aggregator's codification is their own work and can carry the sui generis database right. Full reasoning in [[Corpus Sourcing and Licensing]].
+
 ## Tools & Alternatives Considered
 
 - **uv** (chosen) vs. Poetry vs. pip + requirements.txt — full comparison and command reference in [[uv]].
 - **ruff** for lint + format — rule sets selected, deferred sets, and the reasoning in [[ruff]].
 - **pre-commit** to run ruff (and later other checks) automatically before commits — hook model, the `repo: local` vs. mirror-repo version-drift decision, and config in [[pre-commit]].
 - **poethepoet** for task shortcuts instead of a Makefile or raw `uv run` commands everywhere — task set, the mutate/report split, and config in [[poethepoet]].
+- **Εθνικό Τυπογραφείο (`search.et.gr`)** as the corpus source vs. the far more scrapable private aggregators — the copyright/database-right distinction in [[Corpus Sourcing and Licensing]].
 - **`frozen=True` / immutable value objects** vs. mutable models plus deep-copying in the parser vs. review discipline — the aliasing failure and the cost to V2 in [[Immutable Domain Models]].
 - **pydantic-settings** for typed env-based config vs. `os.environ` reads scattered through the code (untyped, unvalidated, undocumented) — what belongs in config, the fail-fast/defaults reasoning, and the deliberately-thin V0 field set in [[Configuration]].
 
@@ -108,6 +117,13 @@ Standing non-goals for V0 regardless of the above:
 - ~~`.DS_Store` tracked in git~~ — fixed 2026-08-23 (`.gitignore` + `git rm --cached`). Note it remains in history; harmless here, but the same mistake with a `.env` would not be.
 - ~~`poe lint` fails on vault Markdown~~ — fixed 2026-08-23 with `exclude = ["vault"]` under `[tool.ruff]`. Cause worth remembering: [[ruff]] formats Python code blocks *inside Markdown*, and the vault deliberately contains anti-pattern snippets (`def collect(item, acc=[])`, a module-level `Settings()`) shown as examples of what *not* to do. Ruff was scanning 29 vault files against 4 real `.py` files.
 
+### Technical debt from step 11 (2026-08-29)
+
+Both raised in review, both deliberately deferred — neither can bite before [[V2 - Document Ingestion]].
+
+- **`'υπο' * depth` in `SourceReference`.** Renders περ./υποπερ. by repeating a prefix. At `depth=2` it produces `υπουποπερ.`, which is not a real Greek legal term. Unreachable today because the hierarchy in [[Greek Legislation Structure]] stops at υποπερίπτωση — but the code does not say so. A `["περ.", "υποπερ."]` lookup that raises on overflow would encode the real constraint instead of silently inventing a level.
+- **`act_type="Ν."` puts a dot inside the retrieval key** — `Ν.4808/2021/...`. Storing `"Ν"` and adding the dot only when rendering the citation would keep the identifier clean. Cheap now, a re-index later.
+
 ### `extra="forbid"` demonstrated itself (2026-08-23)
 
 First run of `Settings()` failed:
@@ -119,6 +135,19 @@ log_level
 ```
 
 `.env` declared `LOG_LEVEL=DEBUG` while the model had no `log_level` field yet. The guard did exactly what it was chosen for: refused to start, named the offending key, quoted its value. Under pydantic's default `extra="ignore"` the application would have started **silently** with `LOG_LEVEL` doing nothing — an evening lost wondering why debug logging never appeared. See [[Configuration]].
+
+### V0 closed — 2026-08-29
+
+Definition of Done, checked:
+
+- `poe test` (22 passing), `poe lint`, `poe format` all work; pre-commit proven to refuse a bad commit. ✅
+- Settings load from `.env`; a missing required variable fails loudly — and `extra="forbid"` demonstrated itself on a real typo. ✅
+- Domain models exist, with tests exercising validation, immutability and the homoglyph trap. ✅
+- Corpus chosen and documented, with source and terms verified. ✅
+
+**Carried into V1, deliberately:** step 1's scope/non-goals remain partial — revisit at the start of [[V1 - Minimal LLM Application]], per the note below. Technical debt from step 11 is logged above.
+
+**Structural validation worth recording:** π.δ. 62/2025 nests Βιβλίο › Μέρος › Τμήμα › Κεφάλαιο › Άρθρο — four container levels, and `Βιβλίο` appears nowhere in [[Greek Legislation Structure]]'s hierarchy. Under the rejected "one class per container level" design this document could not have been parsed without a code change. The materialized path absorbed it as data. First real evidence that the modelling decision was right.
 
 ### Session end — 2026-08-29
 

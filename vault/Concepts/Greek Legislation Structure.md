@@ -99,7 +99,29 @@ Options: (a) `Article.text` for loose text alongside `Article.paragraphs`; (b) a
 
 Transliteration (`3Α` → `3A`, `περ. α΄` → `case-a`) buys tidier keys at the price of a second representation to keep in sync forever, plus a mapping table that will eventually be wrong. Keeping source characters means one representation.
 
-Accepted cost: [[V2 - Document Ingestion]] must NFC-normalize everything on the way in, and [[V5 - Hybrid Retrieval]] must normalize queries **with the same function**, or a user typing Latin `A` will not match Greek `Α`.
+Accepted cost: [[V2 - Document Ingestion]] must normalize everything on the way in, and [[V5 - Hybrid Retrieval]] must normalize queries **with the same function**, or a user typing Latin `A` will not match Greek `Α`.
+
+#### Correction (2026-08-29): NFC is not sufficient
+
+Measured against the real corpus — first text extraction from ΦΕΚ Α΄ 121/11.07.2025, page 6:
+
+| Where | What it actually contains | Codepoints |
+| --- | --- | --- |
+| Masthead `ΕΦΗΜΕΡΙΔΑ TΗΣ ΚΥΒΕΡΝΗΣΕΩΣ` | `T` is **Latin** | U+0054 + U+0397 U+03A3 |
+| `Τεύχος A’ 121` | `A` is **Latin**, where τεύχος Α΄ is meant | U+0041 |
+| `ΥΠΟΚΕΦΑΛΑΙΟ Α’` | Greek Α, but the mark is a **right single quote** | U+0391 + U+2019 |
+| What `SourceReference.citation` renders | Greek Α + **Greek tonos** | U+0391 + U+0384 |
+
+So the official gazette mixes scripts *inside a single word* in its own masthead, and marks ordinals with U+2019 rather than the U+0384 our renderer emits.
+
+**NFC does not fix any of this.** NFC composes/decomposes accents — `ά` as one codepoint versus alpha + combining acute. It will never map Latin `A` to Greek `Α`, nor `’` to `΄`; they are semantically distinct characters, not alternate encodings of one character.
+
+Normalization therefore needs **two** stages, and the second is a project decision, not a Unicode standard:
+
+1. **NFC** — accent composition. Standard, safe, non-negotiable.
+2. **Confusable folding** — an explicit map (Latin `A`→Greek `Α`, `B`→`Β`, `E`→`Ε`, `H`→`Η`, `I`→`Ι`, `K`→`Κ`, `M`→`Μ`, `N`→`Ν`, `O`→`Ο`, `P`→`Ρ`, `T`→`Τ`, `X`→`Χ`, `Y`→`Υ`, `Z`→`Ζ`, plus `’`/`'`/`΄`→ one chosen mark). Applied to *identifiers* — article numbers, ordinals — and to queries with the same function. Applying it to body text is a separate call, since Latin characters legitimately appear there (EU directive references, trade names).
+
+Owned by [[V2 - Document Ingestion]]; the fix is one shared function, and the risk is having two.
 
 ## Traps
 
