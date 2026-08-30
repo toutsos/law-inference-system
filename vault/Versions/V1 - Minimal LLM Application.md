@@ -12,7 +12,7 @@ The smallest useful LLM application: a question goes in, a prompt is built, an L
 
 - [x] **1. Choose the LLM provider and model; record pricing** — _Why:_ this is the project's first real technology decision — compare at least two options (capability on Greek text, cost per million tokens, structured-output support, rate limits) and record the choice below. Nothing else in this version can start without it. — _Done 2026-08-29: Ollama + `ilsp/llama-krikri-8b-instruct`. No pricing to record (local inference); the cost axis becomes latency and tokens/second, see the Decisions below. Comparison against a larger general model deferred — logged as debt._
 - [~] **2. Wire the model config through Pydantic Settings** _(no API key — Ollama needs none)_ — _Why:_ the config seam from [[V0 - Project Foundation]] exists precisely for this; the key lives in `.env`, never in code, never in git. With a local provider there is no secret, so what is being wired is *where the server is* and *which model to call*. — **IN PROGRESS 2026-08-29:** `ollama_base_url` and `ollama_model` added; `request_timeout` still missing from `Settings` while present in `.env`, so `Settings()` currently raises. See the session note below.
-- [ ] **3. Learn the raw API first: one throwaway script calling the SDK directly** — _Why:_ before wrapping anything, see what a request/response actually contains — messages, roles, token counts, finish reasons. Abstractions are only understandable after the thing they abstract.
+- [x] **3. Learn the raw API first: one throwaway script calling the HTTP API directly** _(raw `POST /api/chat`, not the `ollama` SDK — the SDK returns a parsed object and hides the wire format this step exists to expose)_ — _Why:_ before wrapping anything, see what a request/response actually contains — messages, roles, token counts, finish reasons. Abstractions are only understandable after the thing they abstract. — _Done 2026-08-30: `scripts/probe_ollama.py`, raw `httpx.post` to `/api/chat`. First measurement recorded in the Notes below._
 - [ ] **4. Design a thin `LLMClient` interface and implement it for the chosen provider** — _Why:_ a seam you own means the provider can be swapped, calls can be faked in tests, and cross-cutting concerns (logging, retries, cost tracking) have one home. Keep it thin — a leaky wrapper that re-exposes the whole SDK teaches nothing and protects nothing.
 - [ ] **5. Define Pydantic request/response models for the application boundary** — _Why:_ `answer_question(Question) -> Answer` with typed models is the contract every later version extends (V3 adds sources, V6 adds citations); starting typed avoids a painful retrofit.
 - [ ] **6. Write the first prompt as a named, versioned template (not an f-string inline)** — _Why:_ prompts are code — they need a home, a diff history, and later ([[V7 - Evaluation Framework]]) regression tests. Include a system prompt that sets the legal-assistant role and the honesty constraints from [[Home]]'s scope boundary.
@@ -34,7 +34,14 @@ The smallest useful LLM application: a question goes in, a prompt is built, an L
 
 ## Tools & Alternatives Considered
 
-_To fill during the version: provider comparison (capabilities on Greek, pricing, SDK quality), retry libraries (tenacity vs. hand-rolled backoff), prompt storage (module constants vs. template files)._
+- **2026-08-30: HTTP client — `httpx`, over `urllib.request` and over the `ollama` SDK.**
+  - _Rejected reason:_ "httpx supports async." Async belongs to [[V10 - Concurrent Execution]], whose own rule is *profile first*. Choosing a dependency for a capability no measured problem requires is the speculative-complexity failure Golden Rule 6 exists to prevent. Async is a free bonus here, not a justification.
+  - _Actual reason — step 7._ Typed exceptions (`httpx.TimeoutException`, `httpx.HTTPStatusError` carrying `.response.status_code`) versus urllib's `HTTPError`, which is simultaneously an exception and a response object, and whose timeouts surface inconsistently as `URLError`-wrapped `socket.timeout` or bare `TimeoutError`. Retry logic that must sniff `e.reason` will eventually retry the wrong thing.
+  - _Second reason:_ httpx separates connect/read/write timeouts. Against a local Ollama that distinction is real — connect should fail fast (localhost is up or it isn't) while read must be patient, because an 8B model generating ~500 tokens legitimately exceeds 30s. One shared timeout number cannot express that.
+  - _Cost accepted:_ for the step 3 probe alone, `urllib.request` costs zero dependencies and ~6 extra lines. The dependency is genuinely being bought for step 4's client, not for the probe.
+  - _`ollama` SDK rejected for step 3_ (revisit at step 4): it returns a parsed object, hiding the wire format that step 3 exists to expose. See [[LLM Chat API]].
+
+_Still to fill: provider comparison (capabilities on Greek, pricing, SDK quality), retry libraries (tenacity vs. hand-rolled backoff), prompt storage (module constants vs. template files)._
 
 ## Definition of Done (version-specific)
 
@@ -80,6 +87,50 @@ That reframes what RAG is for in this project. Not *"stop the model lying about 
 3. *«κανονική ή έκτακτη»* καταγγελία — the standard distinction is *τακτική* vs *έκτακτη*.
 
 **Behavioural note for step 6.** The model opened by declining to give legal advice and closed by recommending a lawyer. That aligns with the scope boundary in [[Home]], but it also shows the model is *tuned toward vagueness* — while the product requires specificity with sources. The system prompt must push against that tuning: "cite the provision or say you do not know", rather than "be careful".
+
+### First wire-level measurement — 2026-08-30 (step 3)
+
+`scripts/probe_ollama.py` → `POST /api/chat`, English system + user message,
+`"stream": false`, cold model.
+
+| Field | Value |
+| --- | --- |
+| `done_reason` | `stop` |
+| `eval_count` (tokens out) | 11 |
+| `eval_duration` | 0.242 s |
+| `total_duration` | 0.635 s |
+| derived | 45.5 tokens/sec |
+
+**Treat 45 tok/s as unusable.** 11 tokens is no sample, and ~393 ms of the
+0.635 s is `load_duration` + `prompt_eval_duration` — the model being pulled
+into memory, not generating. The Java analogy: a throughput figure taken before
+the JIT warmed up. Step 8 needs a re-run with a few hundred tokens against an
+already-resident model, and must decide which number it reports —
+`total_duration` is what the user waits, `eval_duration` is what the model can do.
+
+**`prompt_eval_count` was not captured, and it is the figure that matters most
+here.** Tokens-out stays roughly constant across this project; tokens-in is what
+explodes in [[V3 - First RAG System]], where every retrieved chunk is re-sent on
+every call. Open question worth answering before V3: how many tokens does a
+*Greek* sentence cost under Krikri's extended tokenizer versus the English
+equivalent? That ratio is a direct multiplier on the context budget.
+
+Mechanics of the endpoint are in [[LLM Chat API]].
+
+### Port 11435, not 11434 — 2026-08-30
+
+Ollama on this machine listens on **11435**; the documented default is 11434,
+which is why the first `curl` to `localhost:11434` returned nothing and
+`python3 -m json.tool` reported `Expecting value: line 1 column 1`. Diagnosis
+was `lsof -nP -iTCP -sTCP:LISTEN | grep -i ollama`.
+
+The override belongs in `.env` only. `config.py`'s field default and
+`.env.example` stay at the conventional 11434 — a machine-specific accident must
+not become the committed fallback. This is [[Configuration]]'s rule (config
+varies by *where the code runs*) meeting reality for the first time.
+
+_Debugging lesson worth keeping: `curl -s ... | python3 -m json.tool` hid the
+real error twice. Never pipe a command whose raw output you have not seen._
 
 ### Technical debt
 
