@@ -43,3 +43,11 @@ def test_missing_required_setting_fails_loudly(monkeypatch):
 
     assert "probe_required" in str(exc_info.value)
     assert "Field required" in str(exc_info.value)
+
+
+def test_ollama_model_can_be_overridden_by_env_var(monkeypatch):
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen3:30b")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.ollama_model == "qwen3:30b"
