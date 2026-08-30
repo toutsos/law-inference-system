@@ -19,6 +19,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "mypy>=2.3.1",
     "poethepoet>=0.48.0",
     "pre-commit>=4.6.2",
     "pytest>=9.1.1",
@@ -32,12 +33,33 @@ exclude = ["vault"]
 [tool.ruff.lint]
 select = ["E4","E7","E9","F","I","UP","B","N"]
 
+[tool.mypy]
+python_version = "3.12"
+files = ["src", "tests", "scripts"]
+mypy_path = "src"
+explicit_package_bases = true
+plugins = ["pydantic.mypy"]
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+[tool.pydantic-mypy]
+init_typed = true
+init_forbid_extra = true
+
 [tool.poe.tasks]
 test = "python -m pytest"
 
+[tool.poe.tasks.typecheck]
+help = "Static type check — the closest thing Python has to javac"
+cmd = "mypy"
+
 [tool.poe.tasks.lint]
-help = "Report lint and formatting problems; changes nothing"
-sequence = ["ruff check .", "ruff format --check ."]
+help = "Report lint, formatting and type problems; changes nothing"
+sequence = ["ruff check .", "ruff format --check .", { ref = "typecheck" }]
 default_item_type = "cmd"
 
 [tool.poe.tasks.format]

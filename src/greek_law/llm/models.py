@@ -19,5 +19,5 @@ class ChatResponse(BaseModel):
     content: str
     finish_reason: FinishReason
     tokens_in: int
-    token_out: int
+    tokens_out: int
     duration_seconds: float

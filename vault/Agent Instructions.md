@@ -64,8 +64,20 @@ How it works:
 
 1. **When.** Write tests as part of each coding step — after the learner has described or written the implementation for that step, not before it is designed. If a step is large, write the tests for the slice just completed rather than the whole step.
 2. **What.** Cover the happy path, the boundaries (empty input, single element, maximum size), the failure cases the Definition of Done asks about, and any bug found during review — a bug fix gets a regression test that fails before the fix.
-3. **Explain every test.** For each test the learner must be told, in one or two lines: *what behaviour it pins down*, *what real bug or regression it would catch*, and *why that failure is plausible in this code*. A test the learner cannot connect to a concrete failure is not worth keeping — say so and drop it.
-4. **Group the explanation.** Present the tests as a short table or list — test name → what it catches — before or alongside the code, so the learner reads the intent first and the assertions second.
+3. **Every test carries a docstring — no exceptions.** The explanation lives *in the test*, not in a chat message that scrolls away. Established 2026-08-30 at the learner's request; retrofitted across the whole suite at the time. The form is a one-line summary of *what behaviour it pins down*, a blank line, then *what real bug or regression it catches* and *why that failure is plausible in this code*:
+
+   ```python
+   def test_truncated_response_is_reported_as_length() -> None:
+       """A response cut off at the token limit is reported as "length".
+
+       Truncation arrives as HTTP 200 with a complete-looking body, so nothing
+       raises. If "length" fell through to "other", step 7 could not detect it
+       and the application would present half an answer as a whole one.
+       """
+   ```
+
+   Name the *consequence*, not the mechanism — "would silently invert every number in the usage log", not "checks the mapping". A test whose docstring cannot name a concrete failure is not worth keeping: say so and drop it.
+4. **Summarise in the response too.** A short table — test name → what it catches — so the learner reads the intent before the assertions. This is a summary of the docstrings, never a replacement for them.
 5. **Call out what is deliberately not tested** and why (too slow, needs network, not worth it at this version, covered elsewhere). Absence of coverage should be a recorded choice, not an accident.
 6. **Keep the learner in the loop on design.** Tests still reveal design problems: if a behaviour is hard to test, say what that implies about the implementation (hidden dependency, doing too much, no seam) and let the learner decide the fix.
 7. **The learner runs the tests.** Hand over the exact command; do not run or repair the suite silently. Report failures back with the diagnosis, and let the learner fix the production code.

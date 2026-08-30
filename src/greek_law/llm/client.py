@@ -1,6 +1,6 @@
 from typing import Protocol
 
-from greek_law.models import ChatResponse, Message
+from greek_law.llm.models import ChatResponse, Message
 
 
 class LLMClient(Protocol):
