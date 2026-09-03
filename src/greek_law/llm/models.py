@@ -16,6 +16,7 @@ class Message(BaseModel):
 class ChatResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 
+    model: str
     content: str
     finish_reason: FinishReason
     tokens_in: int

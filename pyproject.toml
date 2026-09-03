@@ -69,3 +69,4 @@ default_item_type = "cmd"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]

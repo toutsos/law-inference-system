@@ -35,6 +35,7 @@ class OllamaClient:
         elapsed = time.perf_counter() - started
         body = response.json()
         return ChatResponse(
+            model=body["model"],
             content=body["message"]["content"],
             finish_reason=_FINISH_REASONS.get(body["done_reason"], "other"),
             tokens_in=body["prompt_eval_count"],

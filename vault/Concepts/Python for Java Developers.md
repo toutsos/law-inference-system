@@ -61,6 +61,54 @@ Two cases only: **state bundled with the behaviour acting on it**, or
 URL, model name and a pooled `httpx.Client`, and gains a hosted implementation
 later. That is where the class the Java instinct wanted actually belongs.
 
+## `Annotated[T, ...]` is Bean Validation
+
+Added 2026-09-03, [[V1 - Minimal LLM Application]] step 5.
+
+```python
+QuestionText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+```
+
+`Annotated[T, ...]` means "the type `T`, plus metadata that tools may read". At
+runtime it *is* `str`; Pydantic reads the constraints and enforces them. Java
+writes the same thing as `@NotBlank @Size(min = 1) String text` — annotations on
+a field that a validator interprets, with the field's type unchanged.
+
+`strip_whitespace=True` **plus** `min_length=1` together are what `@NotBlank`
+means. `min_length=1` alone is `@Size(min = 1)`, which a string of three spaces
+passes. That gap is the whole reason `@NotBlank` exists as a separate annotation.
+
+Naming the alias rather than inlining it is the same instinct as extracting a
+custom constraint annotation: the rule gets one definition and one name.
+
+## A module with one function is a service
+
+Added 2026-09-03, [[V1 - Minimal LLM Application]] step 5.
+
+`application/service.py` holds exactly one function, `answer_question`, and no
+class. In Java that is impossible — a method must live in a class, so
+`QuestionAnsweringService` exists to give `answerQuestion` somewhere to be. In
+Python **the module is the namespace**, and
+`greek_law.application.service.answer_question` is as qualified a name as
+`QuestionAnsweringService.answerQuestion`.
+
+Adding a class with a single method here is the transliteration reflex, the same
+one that produced the `probe_ollama.py` wrapper above. It earns its place under
+the two conditions already listed — bundled state, or several implementations —
+neither of which a one-function module meets.
+
+The collaborator is passed as a **parameter** (`client: LLMClient`) rather than
+held as a field: constructor injection moved to the method. It is what makes a
+fake substitutable with no framework and no `implements`.
+
+## `__all__` is the closest thing to `public`
+
+Python has no `private`. `__all__` in a package's `__init__.py` declares the
+exported surface — a convention that `from x import *` obeys and linters check,
+but nothing enforces at runtime. Underscore-prefixed names (`_http`,
+`_FINISH_REASONS`) are the other half of the convention: "internal, and you are
+on your own if you touch it".
+
 ## Notes
 
 - Recorded 2026-08-30 after four review rounds spent on a class that was really

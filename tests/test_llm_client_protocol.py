@@ -1,30 +1,16 @@
 from greek_law.llm.client import LLMClient
 from greek_law.llm.models import ChatResponse, Message
 from greek_law.llm.ollama_client import OllamaClient
+from tests.fakes import FakeLLMClient
 
 _A_RESPONSE = ChatResponse(
+    model="test-model",
     content="Καλημέρα",
     finish_reason="stop",
     tokens_in=37,
     tokens_out=11,
     duration_seconds=0.24,
 )
-
-
-class FakeLLMClient:
-    """A canned LLMClient: no HTTP, no Ollama, fully deterministic.
-
-    Note what is missing: it does not inherit from LLMClient. Satisfying the
-    Protocol is structural — having the right method is the whole requirement.
-    """
-
-    def __init__(self, response: ChatResponse) -> None:
-        self._response = response
-        self.calls: list[list[Message]] = []
-
-    def chat(self, messages: list[Message]) -> ChatResponse:
-        self.calls.append(messages)
-        return self._response
 
 
 def _requires_an_llm_client(client: LLMClient) -> LLMClient:
