@@ -148,6 +148,49 @@ and Pydantic's `ValidationError` subclass **`ValueError`** — which is why one
 `except (ValueError, KeyError, TypeError)` covers malformed JSON, a missing
 field, and a body of the wrong shape.
 
+## `__main__.py` is the manifest's `Main-Class`
+
+The earlier entry says `if __name__ == "__main__":` is *not* an entry point, and
+that stands for the case it was written about — wrapping a class around it was
+the V1 mistake. The nuance found on 2026-09-05: at module level it **is** the
+idiomatic entry point, but using it has a trap.
+
+`python -m greek_law.cli` runs `cli.py` **as** the main module, so `__name__` is
+the literal string `"__main__"` — the module's real dotted name is not used.
+`logging.getLogger(__name__)` therefore produced a logger called `__main__`,
+orphaned from the `greek_law` hierarchy and immune to
+`getLogger("greek_law").setLevel(...)`. Tests never saw it, because a test
+*imports* the module and an imported module has its real name.
+
+The fix is a **`__main__.py` in the package**: it makes `python -m greek_law`
+work, and the module doing the work is then only ever imported, so its
+`__name__` is always `greek_law.cli`. That file is the closest thing to
+`Main-Class` in a jar manifest — and nothing imports it, so no test can cover
+it. Running the program is the only check.
+
+## Logging: `logback.xml` in two lines
+
+`logging.getLogger()` with no argument is the **root** logger, and every logger
+inherits its level — which is why `basicConfig(level=DEBUG)` handed httpcore's
+TCP handshake the same verbosity we wanted for ourselves. The pattern is root at
+`WARNING`, then raise only our own branch:
+
+```python
+logging.getLogger().setLevel(logging.WARNING)
+logging.getLogger("greek_law").setLevel(settings.log_level)
+```
+
+Names are hierarchical, so that second line covers `greek_law.cli`,
+`greek_law.llm.*` and everything added later — `<root level="WARN">` plus
+`<logger name="com.mycompany" level="DEBUG">`, exactly.
+
+Two more, both bites waiting to happen. **`basicConfig` silently does nothing if
+the root logger already has a handler** — including its `level` argument — which
+is common under pytest, so `setLevel` is the reliable call. And log with
+**`%s` placeholders passed as arguments**, never an f-string:
+`logger.info("tokens=%d", n)` formats only if the level is enabled, which is
+exactly why SLF4J has `log.info("id={}", id)`.
+
 ## Notes
 
 - Recorded 2026-08-30 after four review rounds spent on a class that was really

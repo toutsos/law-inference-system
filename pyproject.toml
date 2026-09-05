@@ -52,6 +52,7 @@ init_forbid_extra = true
 
 [tool.poe.tasks]
 test = "python -m pytest"
+ask = "python -m greek_law"
 
 [tool.poe.tasks.typecheck]
 help = "Static type check — the closest thing Python has to javac"

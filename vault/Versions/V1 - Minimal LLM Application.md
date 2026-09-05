@@ -1,6 +1,6 @@
 Part of [[Home]]. See [[Agent Instructions]] for how decisions/tools/checklist should be maintained.
 
-**Status:** In Progress — started 2026-08-29. Steps 1–7 done (2026-09-05); next is step 8.
+**Status:** In Progress — started 2026-08-29. Steps 1–8 done (2026-09-05); step 9 nearly done; next is step 10, the baseline.
 
 ## Goal
 
@@ -17,7 +17,7 @@ The smallest useful LLM application: a question goes in, a prompt is built, an L
 - [x] **5. Define Pydantic request/response models for the application boundary** — _Why:_ `answer_question(Question) -> Answer` with typed models is the contract every later version extends (V3 adds sources, V6 adds citations); starting typed avoids a painful retrofit. — _Done 2026-09-03: new `application/` package — `models.py` (`Question`, `Answer`, `AnswerMetadata`), `service.py` (`answer_question`). `ChatResponse` gained `model: str`. 8 new test cases, 41 total. See the Decisions below._
 - [x] **6. Write the first prompt as a named, versioned template (not an f-string inline)** — _Why:_ prompts are code — they need a home, a diff history, and later ([[V7 - Evaluation Framework]]) regression tests. Include a system prompt that sets the legal-assistant role and the honesty constraints from [[Home]]'s scope boundary. — _Done 2026-09-05: `application/prompts.py` — `SYSTEM_PROMPT` (Greek), `PROMPT_VERSION`, `build_messages()`. `AnswerMetadata` gained `prompt_version`. 5 new test cases, 45 total. See the Decisions below._
 - [x] **7. Add error handling for the failure modes LLM APIs actually have: timeouts, rate limits (429), transient 5xx** — _Why:_ these are not exotic; they happen weekly. Decide what the application does for each (retry with backoff? fail loudly?) instead of letting exceptions leak raw. — _Done 2026-09-05: `llm/errors.py` (8 classes, transient/permanent split), translation in `OllamaClient.chat`, and `llm/retrying_client.py` (hand-rolled backoff + jitter + wall-clock budget). 15 new test cases, 59 total. See the Decisions below._
-- [ ] **8. Log token usage and estimated cost per call** — _Why:_ cost awareness must become a habit before RAG multiplies prompt sizes ([[V3 - First RAG System]]) and agents multiply call counts ([[V9 - Agentic Workflow]]).
+- [x] **8. Log token usage and estimated cost per call** — _Why:_ cost awareness must become a habit before RAG multiplies prompt sizes ([[V3 - First RAG System]]) and agents multiply call counts ([[V9 - Agentic Workflow]]). — _Done 2026-09-05: `cli.py` (composition root, `argparse`, stdlib `logging`) and `__main__.py`; `poe ask`. Warm-model measurements in the Notes below. 9 new test cases, 68 total._
 - [ ] **9. Test the non-LLM parts with a fake `LLMClient`** — _Why:_ tests that hit a real LLM are slow, non-deterministic, and cost money; the interface from step 4 exists so prompt construction, parsing, and error handling can be tested deterministically. This is the dependency-inversion pattern in miniature.
 - [ ] **10. Baseline experiment: ask 5–10 real Greek legal questions with *no* retrieval; save the answers** — _Why:_ this is the pedagogical hinge of the whole project. Record where the model hallucinates law numbers, invents articles, or answers vaguely. These failures are the *measured motivation* for RAG in [[V3 - First RAG System]], and the same questions become the seed of the eval set in [[V4 - Question to Relevant Law]].
 
@@ -64,6 +64,12 @@ The smallest useful LLM application: a question goes in, a prompt is built, an L
 - **2026-09-05:** **Full jitter (`rng.uniform(0, ceiling)`), and the *ceiling* is what doubles.** Backoff alone spreads retries over time; jitter spreads them across *callers*. Without it, N clients failing at the same instant all retry at 0.5s, then all at 1.0s — a thundering herd that re-floods a provider just as it recovers. _Left out:_ a `max_backoff_seconds` cap, which only matters at attempt counts this project does not reach yet.
 - **2026-09-05:** **A wall-clock budget (`budget_seconds`) alongside `max_attempts`, checked *before* sleeping.** An attempt count cannot bound how long a call takes: a timeout has already consumed the full `request_timeout` before it raises, so 3 attempts at a 30s timeout is a 90-second failure that a caller with a deadline experiences as a hang. Checking after the sleep would enforce the budget only once it was already blown.
 - **2026-09-05:** **`sleep` and `rng` are injected constructor parameters with production defaults.** Third instance of the same rule (`http_client` on 2026-08-30, the client parameter on `answer_question` on 2026-09-03): a dependency that cannot be substituted is a hidden dependency. Concretely it is the difference between a 1.5-second test that asserts nothing about the delay and an instant one that asserts the backoff ceiling doubled. `Callable[[float], None]` is `Consumer<Double>`; the test's `RecordingSleep` uses `__call__` to make an instance callable, which is a functional interface implemented by a class rather than a lambda.
+
+- **2026-09-05:** **`cli.py` is the composition root — the only module that constructs concrete implementations.** `RetryingLLMClient(OllamaClient(...))` is assembled in exactly one place; everything below receives collaborators as parameters. That is why 68 tests run with no network. In Java this is `main` plus the `@Configuration` class: wiring at the top, never in the middle. Split three ways so the untestable part is trivial — `main` (parse, load settings, wire), `_build_client` (testable by type), `run` (fully testable with a fake).
+- **2026-09-05:** **`argparse` over `typer`/`click`; stdlib `logging` over `structlog`.** One positional argument does not justify a dependency, and V8 replaces the CLI with FastAPI anyway. Structured logging is a real technique and it is [[V11 - Observability]]'s subject — Golden Rule 3: `logging` is the concept, `structlog` is the framework.
+- **2026-09-05:** **The answer goes to stdout; every measurement goes to the log on stderr.** The Unix contract, and step 10 depends on it: `poe ask "..." > answer.txt` must produce the model's words and nothing else, or the saved baseline files carry token counts a later reader mistakes for part of the answer. This is the 2026-09-03 decision — measurements returned on `Answer.metadata`, side effects at the edge — finally cashed in: `run` formats what it was handed.
+- **2026-09-05:** **`log_level` finally has a job, and configuring it correctly needed two lines, not one.** `basicConfig(level=...)` sets the **root** logger and every library inherits from it, so the first real run buried the one usage line under twenty lines of httpcore TCP handshake. Correct pattern: root at `WARNING`, then `getLogger("greek_law").setLevel(settings.log_level)` — `<root level="WARN">` plus one `<logger name="...">` in `logback.xml`. Recorded in [[Python for Java Developers]] along with the trap that **`basicConfig` is a no-op when the root logger already has a handler**, `level` included.
+- **2026-09-05:** **`__main__.py`, not `if __name__ == "__main__":` in `cli.py`.** `python -m greek_law.cli` runs the module *as* main, so `__name__` is `"__main__"` and the logger was named `__main__` — orphaned from the `greek_law` hierarchy and immune to the level set above. Tests never saw it because a test *imports* the module. A package `__main__.py` keeps `cli.py` import-only, so its logger name is always `greek_law.cli`.
 
 ## Tools & Alternatives Considered
 
@@ -225,11 +231,49 @@ Worth generalising: **a green `pytest` says nothing about code no test imports.*
 
 **State of the tree at session end:** everything above is written and green, **uncommitted**. `git status` shows `src/greek_law/application/`, `tests/fakes.py`, `tests/test_answer_question.py`, `tests/test_application_models.py` as new, and `pyproject.toml`, `src/greek_law/llm/models.py`, `src/greek_law/llm/ollama_client.py`, `tests/test_llm_client_protocol.py` as modified. One commit for step 5 is the first thing to do tomorrow, before step 6 mixes into the same diff.
 
+### Warm-model measurements and the citation finding — 2026-09-05 (step 8)
+
+First end-to-end runs through `poe ask`, against an already-resident model. **This replaces the 45.5 tok/s figure from 2026-08-30, which was a pre-warmup number and should not be quoted.**
+
+| | |
+| --- | --- |
+| `tokens_in` | 239–240 |
+| `tokens_out` | 197–276 |
+| `duration_seconds` | 6.2–12.0 |
+| rate | **23–32 tok/s** |
+
+**The system prompt costs ~200 tokens.** `tokens_in` is 240 for a ten-word Greek question, and it barely moves between questions — so ~200 of it is fixed overhead. That is the number [[V3 - First RAG System]]'s context budget starts from, and the answer to part of the open tokenizer question.
+
+**The prompt worked, and that is exactly what makes the next finding matter.** Against the 2026-08-29 baseline of **zero** law numbers, articles and ΦΕΚ references, the first run cited five provisions (ν. 4808/2021 άρ. 168 and άρ. 117, ν. 4727/2020 άρ. 158, ν. 1483/1984, ν. 1264/1982). The seed metric from 2026-08-29 — *verifiable provisions cited per answer* — moved from 0 to ~5.
+
+**But the citations are unstable across runs, which is the real result.** The same question asked twice returned contradictory content under the *same* citation:
+
+| Προϋπηρεσία | Run A | Run B |
+| --- | --- | --- |
+| 1–2 years | 1 month | **15 days** |
+| 2–5 / 2–4 years | 2 months | 1 month |
+| 4–6 years | — | 2 months |
+| >5 / >10 years | 3 months | 3 months |
+
+Both runs cited *άρθρο 38 ν. 4488/2017*; run B added παρ. 4 and παρ. 5. Run B also skips 6–10 years entirely. Two answers cannot both be right, so **at least one confident, specific, correctly-formatted citation is wrong** — and nothing in the output distinguishes them.
+
+**This reframes the RAG argument a second time.** On 2026-08-29 the finding was *"the model cannot cite at all"*. Now it is: *the model cites fluently, in the right format, with paragraph-level specificity, and the citation is decoration rather than evidence.* That is a **worse** failure mode for a legal assistant than silence, because it is credible. It is also the sharpest possible motivation for [[V3 - First RAG System]]: retrieval is not there to make the model sound more specific — it already does — but to make specificity *checkable against a dated source*.
+
+**Claims to verify against the Κώδικα** (learner's domain; each becomes a [[V4 - Question to Relevant Law]] eval question):
+
+1. Does *ν. 4488/2017 άρθρο 38* govern προθεσμία προειδοποίησης at all? The provision usually cited is ν. 2112/1920, as amended by ν. 3863/2010 άρ. 74 παρ. 2.
+2. *ν. 4808/2021 άρθρο 117* as the basis for αποζημίωση απόλυσης.
+3. *ν. 4727/2020 άρθρο 158* (digital governance) as the basis for the written form of a καταγγελία.
+
+**One behavioural improvement worth noting:** run B ended with «Δεν γνωρίζω τη διάταξη» — prompt rule 2 firing unprompted. The honesty instruction is reaching the output, even while the citations stay unreliable.
+
 ### Technical debt
 
 - ~~**`httpx` leaks through the seam (2026-08-30).**~~ **Resolved 2026-09-05** — `llm/errors.py` plus translation in `OllamaClient.chat`. Kept for the record: the placeholder test pinning the wrong behaviour did its job, failing exactly when the fix landed.
 - **Retries are silent (2026-09-05).** `RetryingLLMClient` logs nothing, so a call that succeeded on its third attempt is indistinguishable from one that succeeded immediately — except in a latency number nobody is watching yet. Step 8 records `duration_seconds` per call and will make the anomaly visible without explaining it; the fix is a log line per retry, which belongs with [[V11 - Observability]].
 - **`Retry-After` still not honoured (2026-09-05).** `LLMRateLimitedError` backs off on the same curve as everything else, ignoring what the provider asked for. Harmless while Ollama is the only provider (it never sends a 429); wrong the day a hosted provider lands, which is also the day the header becomes testable.
+- **`OllamaClient`'s `httpx.Client` is never closed (2026-09-05).** The CLI constructs it and process exit reclaims the sockets, so it is harmless today. It reopens the lifecycle question left open on 2026-08-30 — does `LLMClient` need a `close()`, or a context manager? — which stops being academic when [[V8 - Tools and Structured Operations]] holds a client across FastAPI requests.
+- **No test can reach `__main__.py` (2026-09-05).** Nothing imports it, so the suite was green while `poe ask` did not start at all. Same blind spot as the empty-module incidents: coverage follows imports, and an entry point is precisely what is never imported. The only check is running the program — worth a smoke test in [[V12 - Production-Oriented System]]'s CI step.
 - **Seam unproven with a single implementation.** An interface with one implementation is a guess about what varies. It stays a guess until the hosted provider lands — expect the `LLMClient` interface to change when it does, and treat that change as the design working, not failing.
 - **Provisional baseline.** Step 10's no-RAG answers are provisional while only the local model exists (see the 2026-08-23 decision).
 - **Machine-specific port committed as the default (2026-08-30).** `ollama_base_url` in `config.py` and `OLLAMA_BASE_URL` in `.env.example` are both `11435`, this machine's Ollama port. The conventional default is `11434`, and per [[Configuration]] the per-machine value belongs in `.env` alone. Harmless today, "works on my machine" the moment anyone else clones it.
