@@ -21,6 +21,7 @@ class AnswerMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     model: str
+    prompt_version: str
     tokens_in: int
     tokens_out: int
     duration_seconds: float

@@ -16,7 +16,7 @@ The project should begin as a small, understandable RAG application and evolve i
 - Apply the engineering patterns and tools from the LLM Engineer's Handbook where they provide real value.
 - Learn to make technology and architecture decisions based on requirements and trade-offs.
 - Keep core application/domain logic understandable and avoid unnecessary framework abstraction.
-- Learn by implementing the code personally; the tutor should guide, review, challenge, and explain rather than write the whole project.
+- Learn by reading, questioning and running working code; the tutor writes it and explains every decision (revised 2026-09-05 — see [[Agent Instructions]], Code Delivery).
 - Build a project that can progressively introduce advanced AI concepts without artificial complexity.
 
 ## Core Product Vision

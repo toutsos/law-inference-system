@@ -109,6 +109,45 @@ but nothing enforces at runtime. Underscore-prefixed names (`_http`,
 `_FINISH_REASONS`) are the other half of the convention: "internal, and you are
 on your own if you touch it".
 
+## Every exception is unchecked, so the *hierarchy* carries the meaning
+
+There is no `throws` clause and no compiler forcing a caller to handle anything —
+every Python exception is what Java calls a `RuntimeException`. Nothing tells a
+caller of `LLMClient.chat()` that it can fail; the only signal available is the
+**type**, which is why `llm/errors.py` splits into `TransientLLMError` /
+`PermanentLLMError` rather than putting a `retryable` flag on one class. A retry
+policy then writes `except TransientLLMError` and the language dispatches.
+
+**This is Spring's `DataAccessException`**: `TransientDataAccessException` vs.
+`NonTransientDataAccessException`, with each driver's `SQLExceptionTranslator`
+mapping vendor codes into it, so `@Retryable` never learns which database it is
+talking to. `OllamaClient` is the translator; the hosted client will be a second.
+
+Defining one is a class with only a docstring — no constructor, since `(message)`
+is inherited. A docstring satisfies the "a block needs a statement" rule, so no
+`pass`.
+
+## `except` clause order is unchecked too — and this one bites
+
+Java rejects catching a superclass before its subclass at compile time
+("exception has already been caught"). **Python runs the first matching clause
+and says nothing.** In `ollama_client.py`, `httpx.TimeoutException` is a subclass
+of `httpx.RequestError`, so putting `RequestError` first would silently turn
+every timeout into `LLMUnavailableError` — a misclassification with no error, no
+warning, and a plausible-looking result.
+
+Check a hierarchy before ordering clauses rather than trusting the name:
+
+```
+uv run python -c "import httpx; print(issubclass(httpx.TimeoutException, httpx.RequestError))"
+```
+
+Two more worth knowing, both found this way: `httpx.HTTPStatusError` is *not* a
+`RequestError` (it descends from `HTTPError`), and both `json.JSONDecodeError`
+and Pydantic's `ValidationError` subclass **`ValueError`** — which is why one
+`except (ValueError, KeyError, TypeError)` covers malformed JSON, a missing
+field, and a body of the wrong shape.
+
 ## Notes
 
 - Recorded 2026-08-30 after four review rounds spent on a class that was really

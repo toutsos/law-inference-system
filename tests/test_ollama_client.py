@@ -1,9 +1,20 @@
 import json
+from collections.abc import Callable
 from typing import Any
 
 import httpx
 import pytest
 
+from greek_law.llm.errors import (
+    LLMError,
+    LLMProtocolError,
+    LLMRateLimitedError,
+    LLMRequestError,
+    LLMTimeoutError,
+    LLMUnavailableError,
+    PermanentLLMError,
+    TransientLLMError,
+)
 from greek_law.llm.models import Message
 from greek_law.llm.ollama_client import OllamaClient
 
@@ -31,6 +42,23 @@ def _client_returning(
             captured.append(request)
         return httpx.Response(status, json=body)
 
+    return _client_with(handler)
+
+
+def _client_raising(error: Exception) -> OllamaClient:
+    """An OllamaClient whose transport fails instead of answering.
+
+    MockTransport propagates whatever the handler raises, which is how a
+    timeout or a refused connection is simulated without a network.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise error
+
+    return _client_with(handler)
+
+
+def _client_with(handler: Callable[[httpx.Request], httpx.Response]) -> OllamaClient:
     return OllamaClient(
         base_url="http://ollama.test",
         model="test-model",
@@ -148,15 +176,134 @@ def test_request_carries_roles_and_disables_streaming() -> None:
     ]
 
 
-def test_http_error_reaches_the_caller_as_an_httpx_exception() -> None:
-    """A non-2xx response currently raises httpx.HTTPStatusError at the caller.
+def test_no_httpx_exception_escapes_the_seam() -> None:
+    """A provider failure surfaces as LLMError, never as an httpx type.
 
-    Documents behaviour that is deliberately wrong: httpx leaks straight
-    through the seam, so callers must import httpx to handle a failure. Step 7
-    replaces this with our own exception type, and this test will fail then —
-    on purpose. That failure is the reminder that the change was the goal.
+    This is the whole point of step 7 and replaces the test that deliberately
+    pinned the opposite. If httpx leaks, every caller — service.py, the CLI, the
+    V9 agent loop — must import httpx to write a try/except, which welds the
+    application to one transport and makes the hosted client a breaking change
+    rather than a drop-in. Asserting the httpx type is *absent* is the only
+    formulation that catches a new failure path added later without translation.
     """
     client = _client_returning({"error": "model not found"}, status=404)
 
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(LLMError) as exc_info:
         client.chat(_one_message())
+
+    assert not isinstance(exc_info.value, httpx.HTTPError)
+
+
+def test_a_read_timeout_becomes_llm_timeout_error() -> None:
+    """A request that never completes raises LLMTimeoutError.
+
+    The single most common real failure against a local 8B model: an answer of
+    a few hundred tokens legitimately outruns a short read timeout. Untranslated
+    it arrives as httpx.ReadTimeout, which a caller catching httpx.HTTPError
+    would *miss entirely* — ReadTimeout is a TransportError, not an HTTPError —
+    and the process would die mid-question with a stack trace.
+    """
+    client = _client_raising(httpx.ReadTimeout("timed out"))
+
+    with pytest.raises(LLMTimeoutError):
+        client.chat(_one_message())
+
+
+def test_a_refused_connection_becomes_llm_unavailable_error() -> None:
+    """Ollama not running raises LLMUnavailableError, not httpx.ConnectError.
+
+    The first error anyone meets on a fresh machine, and the one the 2026-08-30
+    port mix-up produced. It must be distinguishable from "the model rejected
+    the request", because the operator action is completely different: start the
+    server versus fix the payload.
+    """
+    client = _client_raising(httpx.ConnectError("connection refused"))
+
+    with pytest.raises(LLMUnavailableError):
+        client.chat(_one_message())
+
+
+def test_http_429_becomes_llm_rate_limited_error() -> None:
+    """A 429 is reported as rate limiting, separately from other 4xx.
+
+    Ollama never sends one; a hosted provider sends them constantly, and 429 is
+    the one 4xx where retrying the *identical* request is correct. Collapsing it
+    into LLMRequestError would make the retry policy skip exactly the case
+    retries exist for, and the failure would look like a quota problem nobody
+    can reproduce locally.
+    """
+    client = _client_returning({"error": "slow down"}, status=429)
+
+    with pytest.raises(LLMRateLimitedError):
+        client.chat(_one_message())
+
+
+def test_http_500_becomes_llm_unavailable_error() -> None:
+    """A 5xx is the provider's fault, so it is reported as unavailability.
+
+    Catches the boundary being written as `status > 500` or `status >= 400`,
+    either of which puts a retryable server fault in the permanent branch. The
+    call then fails once and stays failed, and a transient blip during the V4
+    eval run scores as a retrieval miss.
+    """
+    client = _client_returning({"error": "internal"}, status=503)
+
+    with pytest.raises(LLMUnavailableError):
+        client.chat(_one_message())
+
+
+def test_http_404_becomes_a_permanent_request_error() -> None:
+    """A 404 (wrong model name) is permanent — retrying cannot fix it.
+
+    The realistic cause is a typo in OLLAMA_MODEL or a model never pulled. If
+    this landed in the transient branch, step 7's retry policy would sit there
+    re-sending a request guaranteed to fail, turning an instant, obvious
+    misconfiguration into a slow one.
+    """
+    client = _client_returning({"error": "model not found"}, status=404)
+
+    with pytest.raises(LLMRequestError) as exc_info:
+        client.chat(_one_message())
+
+    assert isinstance(exc_info.value, PermanentLLMError)
+
+
+def test_a_body_missing_a_field_becomes_llm_protocol_error() -> None:
+    """A 200 response we cannot read raises LLMProtocolError, not KeyError.
+
+    Ollama omits prompt_eval_count when a prompt is served from its cache, so
+    this is a real body, not a hypothetical one. Untranslated it escapes as a
+    bare KeyError('prompt_eval_count') — an exception type that says "bug in our
+    code" to whoever reads the traceback, sending the next hour to the wrong
+    layer. It is deliberately *permanent*: re-sending will not grow the field.
+    """
+    body = {key: value for key, value in _BODY.items() if key != "prompt_eval_count"}
+    client = _client_returning(body)
+
+    with pytest.raises(LLMProtocolError) as exc_info:
+        client.chat(_one_message())
+
+    assert isinstance(exc_info.value, PermanentLLMError)
+
+
+def test_the_transient_and_permanent_split_is_what_a_retry_policy_reads() -> None:
+    """Timeouts and 5xx are TransientLLMError; a bad request never is.
+
+    The classification is the seam's real contract with the retry policy, and it
+    is invisible in any single exception type. Pinning it here means a future
+    error added to the wrong branch fails a test rather than silently changing
+    retry behaviour — a new permanent error under Transient burns the retry
+    budget on a hopeless call; a transient one under Permanent gives up on a
+    blip that a second attempt would have survived.
+    """
+    timeout = _client_raising(httpx.ReadTimeout("timed out"))
+    unavailable = _client_returning({"error": "internal"}, status=503)
+    bad_request = _client_returning({"error": "bad"}, status=400)
+
+    for client, expected in (
+        (timeout, TransientLLMError),
+        (unavailable, TransientLLMError),
+        (bad_request, PermanentLLMError),
+    ):
+        with pytest.raises(expected):
+            client.chat(_one_message())

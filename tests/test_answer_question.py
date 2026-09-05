@@ -1,5 +1,11 @@
-from greek_law.application import AnswerMetadata, Question, answer_question
-from greek_law.llm.models import ChatResponse, Message
+from greek_law.application import (
+    PROMPT_VERSION,
+    AnswerMetadata,
+    Question,
+    answer_question,
+    build_messages,
+)
+from greek_law.llm.models import ChatResponse
 from tests.fakes import FakeLLMClient
 
 _A_RESPONSE = ChatResponse(
@@ -12,22 +18,40 @@ _A_RESPONSE = ChatResponse(
 )
 
 
-def test_the_question_reaches_the_llm_as_a_single_user_message() -> None:
-    """V1 sends exactly one message: the question text, with role "user".
+def test_the_service_sends_exactly_what_the_prompt_module_built() -> None:
+    """answer_question hands the LLM build_messages() output, nothing else.
 
     Pins the prompt actually sent, which is the only thing distinguishing a
     working application from one that answers a *different* question. Catches
-    the text being wrapped, truncated, or sent under role "system" — all of
-    which produce a plausible answer, so no test that only inspects the returned
-    text would notice. This test is written to FAIL at step 6, when a system
-    message is added: that failure is the step landing, not a regression.
+    the service constructing its own message list again — the bug the step 6
+    refactor exists to prevent — which would ship the legal system prompt in
+    tests while production silently sent a bare question, or vice versa.
+    Comparing against build_messages rather than a literal keeps this test
+    about the wiring; the prompt's own content is pinned in test_prompts.py.
     """
     fake = FakeLLMClient(_A_RESPONSE)
-    text = "Τι ισχύει για την καταγγελία σύμβασης;"
+    question = Question(text="Τι ισχύει για την καταγγελία σύμβασης;")
 
-    answer_question(Question(text=text), fake)
+    answer_question(question, fake)
 
-    assert fake.calls == [[Message(role="user", content=text)]]
+    assert fake.calls == [build_messages(question)]
+
+
+def test_the_system_prompt_is_actually_sent() -> None:
+    """A system message reaches the model on every call.
+
+    Redundant with the test above by construction, and deliberately so: that
+    one would still pass if build_messages were gutted to return only the
+    question, since both sides would change together. This one fails. The whole
+    of step 6 — pushing the model from vagueness toward citing provisions —
+    lives in that message, and its absence costs nothing visible except worse
+    answers.
+    """
+    fake = FakeLLMClient(_A_RESPONSE)
+
+    answer_question(Question(text="Γεια"), fake)
+
+    assert fake.calls[0][0].role == "system"
 
 
 def test_the_model_content_becomes_the_answer_text() -> None:
@@ -57,6 +81,7 @@ def test_every_call_measurement_lands_on_the_matching_metadata_field() -> None:
 
     assert answer.metadata == AnswerMetadata(
         model="ilsp/llama-krikri-8b-instruct",
+        prompt_version=PROMPT_VERSION,
         tokens_in=37,
         tokens_out=11,
         duration_seconds=0.24,

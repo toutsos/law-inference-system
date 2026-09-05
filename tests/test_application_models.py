@@ -44,6 +44,7 @@ def test_an_answer_cannot_be_edited_after_it_is_built() -> None:
         text="Η απάντηση.",
         metadata=AnswerMetadata(
             model="test-model",
+            prompt_version="v1",
             tokens_in=37,
             tokens_out=11,
             duration_seconds=0.24,
