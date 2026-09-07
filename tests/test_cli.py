@@ -2,7 +2,7 @@ import logging
 
 import pytest
 
-from greek_law.cli import _build_client, _configure_logging, run
+from greek_law.cli import _configure_logging, build_client, run
 from greek_law.config import Settings
 from greek_law.llm.errors import LLMTimeoutError, LLMUnavailableError
 from greek_law.llm.models import ChatResponse
@@ -135,7 +135,7 @@ def test_a_zero_duration_does_not_divide_by_zero(
 
 
 def test_the_client_stack_is_retries_wrapped_around_ollama() -> None:
-    """_build_client returns a RetryingLLMClient decorating an OllamaClient.
+    """build_client returns a RetryingLLMClient decorating an OllamaClient.
 
     The composition root is the one place the concrete stack is chosen, and the
     order is not interchangeable: retries must sit *outside* the provider to see
@@ -143,10 +143,29 @@ def test_the_client_stack_is_retries_wrapped_around_ollama() -> None:
     which loses every retry silently — the system would still answer, just
     fragilely, and no test of behaviour would notice.
     """
-    client = _build_client(Settings())
+    client = build_client(Settings())
 
     assert isinstance(client, RetryingLLMClient)
     assert isinstance(client._inner, OllamaClient)
+
+
+def test_the_retry_budget_leaves_room_for_every_attempt() -> None:
+    """The wall-clock budget is wide enough for max_attempts full timeouts.
+
+    A timeout burns the whole request_timeout before it raises, so a budget
+    shorter than attempts x timeout silently cancels the later retries: with a
+    30s timeout and a 60s budget, attempt 3 is never made, and with the 180s
+    timeout the baseline run uses, attempt 2 is never made either. Nothing
+    fails loudly — the call just gives up early while the code and the version
+    note both claim three attempts. This is the only place that can notice,
+    because the lost attempts leave no log line and no exception of their own.
+    """
+    settings = Settings(request_timeout=30.0)
+
+    client = build_client(settings)
+
+    assert isinstance(client, RetryingLLMClient)
+    assert client._budget_seconds >= settings.request_timeout * client._max_attempts
 
 
 def test_usage_is_logged_for_an_answer_that_needed_a_retry(

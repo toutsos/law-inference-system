@@ -1,0 +1,67 @@
+{
+  "run": "2026-09-07T16-53-31Z",
+  "annotated_by": "tutor, 2026-09-07",
+  "method": "Each answer was compared against the ΦΕΚ text quoted in questions.json 'expected'. 'verdict' judges the citation; 'flags' record behaviours that are not about citation quality. Verdicts are per-answer and deliberately coarse — partial credit is V4's problem, not this run's.",
+  "annotations": {
+    "q01": {
+      "verdict": "fabricated",
+      "cited": ["ν. 4914/2022 (Α' 61) άρθρο 44 παρ. 1", "άρθρο 44 παρ. 4", "ΓΔΑΕΕ ως εποπτεύουσα"],
+      "flags": [],
+      "note": "Wrong on all four asked facts, with no hedge anywhere. Calls ΕΛΚΑΚ a ΝΠΙΔ (it is an ανώνυμη εταιρεία), names the wrong supervising authority, and invents paragraph-level precision — 'άρθρο 44 παρ. 1' and 'παρ. 4'. The dangerous property is that ν. 4914/2022 (Α' 61) is a real ΦΕΚ reference: the citation resolves, to a document about something else. A reader who checks it finds a real law and stops checking. Verify the subject matter of ν. 4914/2022 yourself — if it is the ΕΣΠΑ/development-programme law, this is the single worst answer in the run despite q04 looking louder."
+    },
+    "q02": {
+      "verdict": "refused_with_fabrication",
+      "cited": ["ν. 4772/2021 άρθρο 44 παρ. 3"],
+      "flags": ["role_dodge"],
+      "note": "Opens with 'Δεν γνωρίζω τη διάταξη' — rule 2 working — then attaches a fabricated citation to the very next sentence. This is the shape of failure the run exists to find: the honesty rule guards the headline claim and leaves the supporting detail unguarded. It happens to say 'ανώνυμη εταιρεία', which is correct, sourced to a provision that does not say it. Separately it dodges: 'η παροχή τέτοιας συγκεκριμένης πληροφορίας δεν εμπίπτει στο ρόλο μου' — identifying a provision is precisely the role, and system prompt rule 3 already forbids this."
+    },
+    "q03": {
+      "verdict": "fabricated",
+      "cited": ["ν. 4918/2022", "ν. 5013/2023"],
+      "flags": ["unmeasured_probe"],
+      "note": "Invents two laws and a state of affairs — that the provisions are 'υπό διαμόρφωση' and awaiting administrative acts. Truth: επτά (7) έως εννέα (9) μέλη, θητεία πέντε (5) ετών, already in force. The designed probe went unmeasured: the model failed a level before the άρθρο 15 / άρθρο δέκατο πέμπτο ambiguity could catch it. That is a property of no-retrieval baselines, not a fault in the question — re-score this one after V3, when the model has the text and the two numbering systems are both in front of it."
+    },
+    "q04": {
+      "verdict": "fabricated",
+      "cited": ["ν. 5110/2024 άρθρο 3 παρ. 1", "ΦΕΚ Α' 103/25-06-2024", "Σώμα Υγειονομικού των Ενόπλων Δυνάμεων (Σ.Υ.Ε.Δ.)"],
+      "flags": ["accidental_correct_token"],
+      "note": "Invents an entire institution and a ΦΕΚ number to go with it — Α' 103/25-06-2024, against the real Α' 75/24.05.2024. Truth: Κοινό Σώμα Πληροφορικής (ΠΛΗ), άρθρα 47-48. Note what it got right: 'υπάγεται απευθείας στον Α/ΓΕΕΘΑ' is correct, by coincidence, inside a wholly fabricated answer. This is the concrete warning for V4 — a token-overlap or keyword-recall metric would score q04 as a partial hit."
+    },
+    "q05": {
+      "verdict": "refused",
+      "cited": [],
+      "flags": ["misreads_question"],
+      "note": "A clean refusal with no fabricated citation attached — the best-behaved answer in the run after q10. It is undermined by misquoting the law number it was handed: 'Δεν γνωρίζω τη διάταξη (ν. 5110/2022)', then speculating the user meant 2024. The number was in the prompt verbatim. Worth watching whether this survives retrieval or is an artifact of the 8B model's copying accuracy."
+    },
+    "q06": {
+      "verdict": "fabricated",
+      "cited": ["ΥΑ Φ.069/37/1284484 Σ. 8453/22-12-2017 (ΦΕΚ Β' 4756) άρθρο 6 παρ. 2"],
+      "flags": [],
+      "note": "The most convincing fabrication in the set, because of its specificity: a full ministerial-decision protocol number, a ΦΕΚ Β' reference, an article and a paragraph. A real citation would rarely look this complete. It then declines to give the amount and advises checking the decision — so the one checkable number, 300 ευρώ, never appears. Truth: άρθρο 63 ν. 5110/2024, adding παρ. 14 to άρθρο 64 ν. 3978/2011. The two-law amendment chain was never reached."
+    },
+    "q07": {
+      "verdict": "refused",
+      "cited": [],
+      "flags": ["denies_law_exists"],
+      "note": "Refuses without inventing a provision, then asserts a false fact with confidence: 'βάσει των πληροφοριών που είναι διαθέσιμες έως τον Αύγουστο του 2024, δεν έχει θεσπιστεί ο ν. 5110/2024, επομένως πιθανότατα αναφέρεται σε μελλοντικό νόμο'. Its own stated cutoff postdates the law's publication on 24.05.2024 by three months. Nothing in the system prompt forbids asserting non-existence — a gap this run found, and rule 2 does not cover it because no citation is involved."
+    },
+    "q08": {
+      "verdict": "fabricated",
+      "cited": ["ν. 4386/2016 (Α' 83)"],
+      "flags": ["denies_law_exists"],
+      "note": "Opens 'δεν υπάρχει νόμος 5110/2024', then answers from priors: rights belong to the funder or the scientific lead. Truth (άρθρο 11 παρ. 1): δικαιούχος είναι ο ανάδοχος, with the Διακρατικά Ολοκληρωμένα Προγράμματα excepted and the State holding use rights in defence, security and civil protection (παρ. 2). The counter-intuitive-default probe fired exactly as designed — the wrong answer is the one sound legal instinct produces, which is why it needs retrieval rather than a better prompt."
+    },
+    "q09": {
+      "verdict": "refused_with_fabrication",
+      "cited": ["ν. 4796/2021 άρθρο 84 παρ. 1, 2, 3"],
+      "flags": ["denies_law_exists"],
+      "note": "Refuses, asserts non-publication, and then volunteers an unrequested example citation to illustrate that entry into force can vary by part of a law. The illustration is itself a fabrication. Note the failure is generous rather than evasive: the model added a citation nobody asked for. Truth: άρθρο 82 — ισχύς από τη δημοσίευση, εκτός αν άλλως ορίζεται σε επιμέρους διατάξεις. Contains a language glitch, 'Ως σύστημα I χρειάζεται', worth watching as a Greek-fluency signal."
+    },
+    "q10": {
+      "verdict": "correct",
+      "cited": ["ν. 4808/2021 άρθρο 55", "ν. 4808/2021 άρθρο 74"],
+      "flags": ["denies_law_exists", "self_contradiction"],
+      "note": "The only correct outcome in the run: it refused the false premise instead of inventing an article of ν. 5110/2024 about the ψηφιακή κάρτα εργασίας. Scored correct on outcome, but the reasoning is wrong — 'ο νόμος 5110 αναφέρεται σε έτος που δεν έχει ακόμη έρθει' is nonsense for a law published in May 2024, so the right refusal came from a false belief rather than from checking the law's subject matter. It then contradicts itself inside one answer, citing άρθρο 55 ν. 4808/2021 in one paragraph and άρθρο 74 in the next for the same institution. Keep this question in every future run: it is the one datapoint that stays comparable when corpus, prompt and retrieval all change."
+    }
+  }
+}

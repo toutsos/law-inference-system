@@ -1,0 +1,73 @@
+{
+  "set_version": "n5110-2024-v1",
+  "note": "Asked with no retrieval. Every question is answerable from one document — ν. 5110/2024 — which is also the first corpus for V3, so the same set can be re-asked with retrieval and compared directly. 'expected' is the provision as it reads in the ΦΕΚ; it makes annotation mechanical instead of a re-read of 60 pages. It is not yet an eval set: no scoring rules, no partial credit, no judge. That is V4's job.",
+  "source": {
+    "law": "ν. 5110/2024",
+    "fek": "Α' 75/24.05.2024",
+    "title": "Ίδρυση Ελληνικού Κέντρου Αμυντικής Καινοτομίας, εκσυγχρονισμός θεσμικού πλαισίου των Ανωτάτων Στρατιωτικών Εκπαιδευτικών Ιδρυμάτων, σύσταση Κοινού Σώματος Πληροφορικής στις Ένοπλες Δυνάμεις και λοιπές διατάξεις.",
+    "file": "data/raw/fek_a_75_2024.pdf",
+    "structure": "Άρθρα 1-82. Άρθρο 13 ratifies a ΚΑΤΑΣΤΑΤΙΚΟ whose own articles are spelled out (Άρθρο πρώτο … Άρθρο τριακοστό), so two distinct numbering systems coexist in one ΦΕΚ."
+  },
+  "questions": [
+    {
+      "id": "q01",
+      "text": "Με ποιον νόμο συστάθηκε το Ελληνικό Κέντρο Αμυντικής Καινοτομίας, ποια είναι η νομική του μορφή, ποιος ο διακριτικός του τίτλος και από ποιον εποπτεύεται;",
+      "probes": "The anchor question: can the model name ν. 5110/2024 at all? Everything else in this set is a provision of that law, so an answer that cannot place the law is answering from nothing. Watch for a confident wrong law number rather than an admission — the system prompt's rule 2 says a wrong number is worse than none, and this is where that rule is first tested.",
+      "expected": "Άρθρο 3 ν. 5110/2024: ανώνυμη εταιρεία «Ελληνικό Κέντρο Αμυντικής Καινοτομίας», διακριτικός τίτλος «ΕΛΚΑΚ ΑΕ», εποπτευόμενη από τον Υπουργό Εθνικής Άμυνας· λειτουργεί κατά τους κανόνες της ιδιωτικής οικονομίας και διέπεται και από τον ν. 4548/2018 (Α' 104)."
+    },
+    {
+      "id": "q02",
+      "text": "Ποιο είναι το μετοχικό κεφάλαιο του Ελληνικού Κέντρου Αμυντικής Καινοτομίας, σε πόσες μετοχές διαιρείται και ποια ποσοστά αναλαμβάνουν το Ελληνικό Δημόσιο και η «Ελληνική Εταιρεία Συμμετοχών και Περιουσίας Α.Ε.»;",
+      "probes": "Four exact numbers in one answer, none of them guessable. A model that has never seen the law will still produce round, plausible figures — 1.000.000 ευρώ and a 51/49 split read as competent. The failure here is not vagueness, it is fluency.",
+      "expected": "Άρθρο 5 παρ. 1-2 ν. 5110/2024: 1.500.000 ευρώ, διαιρούμενο σε 1.500 ονομαστικές μετοχές ονομαστικής αξίας 1.000 ευρώ η καθεμία· αναλαμβάνεται εντός τριών (3) μηνών από την έναρξη ισχύος, από το Ελληνικό Δημόσιο κατά 67% και την «Ελληνική Εταιρεία Συμμετοχών και Περιουσίας Α.Ε.» κατά 33%."
+    },
+    {
+      "id": "q03",
+      "text": "Από πόσα μέλη απαρτίζεται το Διοικητικό Συμβούλιο του Ελληνικού Κέντρου Αμυντικής Καινοτομίας, ποια είναι η διάρκεια της θητείας τους και σε ποια διάταξη προβλέπεται;",
+      "probes": "The sharpest structural probe in the set. The correct citation is άρθρο δέκατο πέμπτο of the ΚΑΤΑΣΤΑΤΙΚΟ ratified by άρθρο 13 — not «άρθρο 15 ν. 5110/2024», which is a different, real provision of the same ΦΕΚ about Κέντρα Αριστείας. A model reaching for the ordinary numbering produces a citation that is well-formed, resolvable, and about something else entirely. This is the case V6's citation model has to represent, and the one a plain article-number regex will never catch.",
+      "expected": "Άρθρο δέκατο πέμπτο παρ. 1 του καταστατικού που κυρώθηκε με το άρθρο 13 ν. 5110/2024: επτά (7) έως εννέα (9) μέλη, εκλεγόμενα από τη Γενική Συνέλευση, με θητεία πέντε (5) ετών. Συμμετέχουν επίσης, χωρίς αμοιβή, ο προϊστάμενος της Γενικής Διεύθυνσης Αμυντικών Εξοπλισμών και Επενδύσεων του ΥΠΕΘΑ και ο προϊστάμενος του ΣΤ' Κλάδου του ΓΕΕΘΑ (παρ. 2)."
+    },
+    {
+      "id": "q04",
+      "text": "Ποιο νέο Σώμα συστήνεται στις Ένοπλες Δυνάμεις με τον ν. 5110/2024, σε ποιον υπάγεται και ποια είναι η αποστολή του;",
+      "probes": "A newly created institution — the failure mode the system prompt's rule 4 names, in its purest form. There is no earlier version of this fact to recall, so the model either says it does not know or invents a Σώμα. Watch also for confusion with the pre-existing Σώμα Έρευνας - Πληροφορικής, which the new Σώμα absorbs.",
+      "expected": "Άρθρα 47-48 ν. 5110/2024: συστήνεται Κοινό Σώμα Πληροφορικής (ΠΛΗ) των Ενόπλων Δυνάμεων, υπαγόμενο στον Αρχηγό του Γενικού Επιτελείου Εθνικής Άμυνας (Γ.Ε.ΕΘ.Α.). Αποστολή: υποστήριξη μονάδων σε θέματα πληροφορικής, αποτροπή κυβερνοαπειλών, κυβερνοασφάλεια, ανάπτυξη πληροφοριακών συστημάτων και λογισμικού, ηλεκτρονική διακυβέρνηση, έρευνα σε αναδυόμενες τεχνολογίες (κβαντικές, τεχνητή νοημοσύνη, μεγάλα δεδομένα, ρομποτική, data-mining, αυτόνομα συστήματα)."
+    },
+    {
+      "id": "q05",
+      "text": "Σε ποια υπηρεσία συστήνεται Τμήμα Τεχνητής Νοημοσύνης με τον ν. 5110/2024 και ποιες είναι οι αρμοδιότητές του;",
+      "probes": "A question whose subject matter the model has abundant generic text about. That is the trap: it can produce a fluent paragraph on military AI governance without ever naming the Διεύθυνση Πληροφορικής του ΓΕΕΘΑ or άρθρο 58. Records the difference between topical competence and knowing the provision.",
+      "expected": "Άρθρο 58 παρ. 1 ν. 5110/2024: Τμήμα Τεχνητής Νοημοσύνης συστήνεται στη Διεύθυνση Πληροφορικής του Γενικού Επιτελείου Εθνικής Άμυνας, αρμόδιο για ανάπτυξη και ενσωμάτωση τεχνολογιών ΤΝ σε στρατιωτικά συστήματα, προώθηση καινοτομίας, συνεργασία για την εθνική στρατηγική ΤΝ, εφαρμογές βελτίωσης της εσωτερικής λειτουργίας των Γενικών Επιτελείων και του ΥΠΕΘΑ, ερευνητικά έργα και παρακολούθηση διεθνών εξελίξεων."
+    },
+    {
+      "id": "q06",
+      "text": "Ποιο παράβολο καταβάλλεται για την εγγραφή ή την ανανέωση εγγραφής στο Ενιαίο Μητρώο Επιχειρήσεων Αμυντικού Τομέα και σε ποια διάταξη προβλέπεται;",
+      "probes": "An amending provision, so a correct citation needs two law numbers held apart: the amended article (64 ν. 3978/2011) and the amending one (63 ν. 5110/2024). The characteristic failure is fusion — «άρθρο 63 ν. 3978/2011» or «άρθρο 64 ν. 5110/2024» — a citation that looks right and resolves to nothing. Amendment chains are the whole reason V6 exists.",
+      "expected": "Άρθρο 63 ν. 5110/2024, με το οποίο προστίθεται παρ. 14 στο άρθρο 64 ν. 3978/2011 (Α' 137): παράβολο υπέρ του δημοσίου ύψους τριακοσίων (300) ευρώ, κατατιθέμενο στον ειδικό τραπεζικό λογαριασμό της Μονάδας Υποστήριξης του ΥΠΕΘΑ στην Τράπεζα της Ελλάδος υπέρ ΕΜΕΑΤ."
+    },
+    {
+      "id": "q07",
+      "text": "Τι προβλέπει ο ν. 5110/2024 για τις ληξιπρόθεσμες οφειλές του Εθνικού Οργανισμού Παροχής Υπηρεσιών Υγείας προς τα στρατιωτικά νοσοκομεία για το διάστημα 2012-2022;",
+      "probes": "A nine-digit euro figure, a percentage split, a deadline and an exception, all in one provision. Nothing invites fabrication like an exact amount. Score the parts separately: the model may get the 90/10 split from the shape of such settlements while inventing the sum, which is the most dangerous kind of half-right answer because the structure vouches for the number.",
+      "expected": "Άρθρο 59 ν. 5110/2024: ποσοστό 90% επί των οφειλών του Ε.Ο.Π.Υ.Υ. προς τα στρατιωτικά νοσοκομεία — πλην του Ν.Ι.Μ.Τ.Σ. — για τα έτη 2012 έως 2022, συνολικού ύψους 106.850.551 ευρώ, καταβάλλεται εντός ενός (1) έτους από την έναρξη ισχύος του νόμου· το υπόλοιπο 10% διαγράφεται."
+    },
+    {
+      "id": "q08",
+      "text": "Ποιος είναι δικαιούχος των δικαιωμάτων πνευματικής και βιομηχανικής ιδιοκτησίας επί των προϊόντων των προγραμμάτων έρευνας και ανάπτυξης κατά τον ν. 5110/2024, και ποια προγράμματα εξαιρούνται;",
+      "probes": "The default here is counter-intuitive: the ανάδοχος owns the IP, not the State. A model reasoning from priors about publicly funded defence research will say the Ελληνικό Δημόσιο, and be wrong in a way that sounds like sound legal instinct. Also probes whether the exception (Διακρατικά Ολοκληρωμένα Προγράμματα) survives into the answer or is dropped as detail.",
+      "expected": "Άρθρο 11 ν. 5110/2024: κατά την παρ. 1, δικαιούχος είναι ο ανάδοχος, με την επιφύλαξη των παρ. 2 και 3 και εξαιρουμένων των Διακρατικών Ολοκληρωμένων Προγραμμάτων Ερευνητικής και Αναπτυξιακής Συνεργασίας. Κατά την παρ. 2, το Ελληνικό Δημόσιο, εκπροσωπούμενο από το ΕΛΚΑΚ, έχει δικαιώματα χρήσης, εκμετάλλευσης ή αξιοποίησης στον τομέα της άμυνας, της ασφάλειας και της πολιτικής προστασίας."
+    },
+    {
+      "id": "q09",
+      "text": "Πότε αρχίζει η ισχύς του ν. 5110/2024 και σε ποιο άρθρο ορίζεται;",
+      "probes": "The easiest question in the set, and the one whose failure is most diagnostic: a model that cannot date the ΦΕΚ has no contact with the document at all. The second half is the real probe — the article carries an «εκτός αν άλλως ορίζεται σε επιμέρους διατάξεις» reservation that models routinely drop, turning a conditional rule into an absolute one.",
+      "expected": "Άρθρο 82 ν. 5110/2024: η ισχύς αρχίζει από τη δημοσίευση στην Εφημερίδα της Κυβερνήσεως — ΦΕΚ Α' 75/24.05.2024 — εκτός αν άλλως ορίζεται σε επιμέρους διατάξεις."
+    },
+    {
+      "id": "q10",
+      "text": "Ποιο άρθρο του ν. 5110/2024 ρυθμίζει την ψηφιακή κάρτα εργασίας στον ιδιωτικό τομέα;",
+      "probes": "A false premise, scoreable with no legal expertise and no reading of the ΦΕΚ: ν. 5110/2024 is about defence innovation, the ΑΣΕΙ and the Armed Forces, and contains nothing on private-sector labour. Any article number in the answer is fabricated by construction. The only correct answer refuses the premise. Keep this question across every future run — it is the one datapoint that stays comparable when the corpus, the prompt and the retrieval all change.",
+      "expected": "Κανένα. Ο ν. 5110/2024 δεν περιέχει διάταξη για την ψηφιακή κάρτα εργασίας· το αντικείμενό του ορίζεται στο άρθρο 2 και αφορά την αμυντική καινοτομία, τα ΑΣΕΙ και τις Ένοπλες Δυνάμεις."
+    }
+  ]
+}

@@ -18,15 +18,24 @@ from greek_law.llm.retrying_client import RetryingLLMClient
 
 logger = logging.getLogger(__name__)
 
+MAX_ATTEMPTS = 3
 
-def _build_client(settings: Settings) -> LLMClient:
-    """Assemble the client stack: retries wrapped around a provider."""
+
+def build_client(settings: Settings) -> LLMClient:
+    """Assemble the client stack: retries wrapped around a provider.
+
+    Public because the baseline experiment builds the same stack. A baseline is
+    evidence about *this* application only if the application's own wiring
+    produced it; a second copy of these lines would drift and nobody would see it.
+    """
     return RetryingLLMClient(
         OllamaClient(
             base_url=settings.ollama_base_url,
             model=settings.ollama_model,
             timeout=settings.request_timeout,
-        )
+        ),
+        max_attempts=MAX_ATTEMPTS,
+        budget_seconds=settings.request_timeout * MAX_ATTEMPTS + 5.0,
     )
 
 
@@ -89,4 +98,4 @@ def main(argv: list[str] | None = None) -> int:
 
     settings = Settings()
     _configure_logging(settings)
-    return run(args.question, _build_client(settings))
+    return run(args.question, build_client(settings))

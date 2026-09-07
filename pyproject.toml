@@ -35,7 +35,7 @@ select = ["E4","E7","E9","F","I","UP","B","N"]
 
 [tool.mypy]
 python_version = "3.12"
-files = ["src", "tests", "scripts"]
+files = ["src", "tests", "scripts", "experiments"]
 mypy_path = "src"
 explicit_package_bases = true
 plugins = ["pydantic.mypy"]
@@ -53,6 +53,8 @@ init_forbid_extra = true
 [tool.poe.tasks]
 test = "python -m pytest"
 ask = "python -m greek_law"
+baseline = "python -m experiments.baseline_no_rag.run"
+review = "python -m experiments.baseline_no_rag.review"
 
 [tool.poe.tasks.typecheck]
 help = "Static type check — the closest thing Python has to javac"
