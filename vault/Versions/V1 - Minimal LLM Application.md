@@ -1,6 +1,6 @@
 Part of [[Home]]. See [[Agent Instructions]] for how decisions/tools/checklist should be maintained.
 
-**Status:** In Progress — started 2026-08-29. Steps 1–9 done (step 9 closed 2026-09-07). Steps 1–10 done (2026-09-07). The baseline is run and annotated — 0/10 correct provisions, findings in the Notes below. What remains before the version closes: the architecture review and the V3 hand-off.
+**Status:** In Progress — started 2026-08-29. Steps 1–9 done (step 9 closed 2026-09-07). Steps 1–10 done, architecture review done, hand-off written into [[V2 - Document Ingestion]], [[V3 - First RAG System]] and [[V4 - Question to Relevant Law]] (all 2026-09-07). **One Definition-of-Done item is open and only the learner can close it:** "the learner can explain the main design decisions."
 
 ## Goal
 
