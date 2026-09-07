@@ -15,6 +15,7 @@ _A_RESPONSE = ChatResponse(
     tokens_in=37,
     tokens_out=11,
     duration_seconds=0.24,
+    attempts=2,
 )
 
 
@@ -68,11 +69,12 @@ def test_the_model_content_becomes_the_answer_text() -> None:
 
 
 def test_every_call_measurement_lands_on_the_matching_metadata_field() -> None:
-    """All five ChatResponse measurements arrive under the right Answer names.
+    """All six ChatResponse measurements arrive under the right Answer names.
 
     The mapping block in service.py is hand-written field by field, so a
-    copy-paste slip that swaps tokens_in with tokens_out, or reuses
-    response.tokens_out twice, type-checks and never raises. It would invert
+    copy-paste slip that swaps tokens_in with tokens_out, reuses
+    response.tokens_out twice, or hardcodes attempts=1, type-checks and
+    never raises. It would invert
     step 8's usage log and make the V3 context-budget numbers wrong in the
     direction that looks reassuring. Comparing the whole model at once catches
     any permutation, not just the pair a targeted assertion happened to check.
@@ -86,4 +88,5 @@ def test_every_call_measurement_lands_on_the_matching_metadata_field() -> None:
         tokens_out=11,
         duration_seconds=0.24,
         finish_reason="stop",
+        attempts=2,
     )

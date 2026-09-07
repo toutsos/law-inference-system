@@ -3,6 +3,17 @@ from pydantic import BaseModel, ConfigDict
 from greek_law.domain.act import ActIdentity
 
 
+def _slug(value: str) -> str:
+    """Collapse whitespace in one key segment. Nothing else is touched.
+
+    Deliberately *not* a general slugifier: the Greek alphabet must survive,
+    per the identifier-alphabet decision, so no ASCII-folding and no case
+    change. Whitespace is the only character an article number contributes
+    that a flat identifier cannot carry.
+    """
+    return "-".join(value.split())
+
+
 class SourceReference(BaseModel):
     """A structured pointer to one addressable provision.
 
@@ -41,12 +52,12 @@ class SourceReference(BaseModel):
         would be a second representation to keep in sync forever.
         """
         segments = [
-            f"{self.act.act_type}{self.act.number}",
+            _slug(f"{self.act.act_type}{self.act.number}"),
             str(self.act.year),
-            f"άρθρο-{self.article}",
+            f"άρθρο-{_slug(self.article)}",
         ]
         if self.paragraph is not None:
-            segments.append(f"παρ-{self.paragraph}")
+            segments.append(f"παρ-{_slug(self.paragraph)}")
         for depth, case in enumerate(self.cases):
-            segments.append(f"{'υπο' * depth}περ-{case}")
+            segments.append(f"{'υπο' * depth}περ-{_slug(case)}")
         return "/".join(segments)

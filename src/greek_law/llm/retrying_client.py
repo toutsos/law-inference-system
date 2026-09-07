@@ -40,7 +40,7 @@ class RetryingLLMClient:
 
         while True:
             try:
-                return self._inner.chat(messages)
+                response = self._inner.chat(messages)
             except TransientLLMError:
                 if attempt >= self._max_attempts:
                     raise
@@ -50,3 +50,5 @@ class RetryingLLMClient:
                 self._sleep(delay)
                 backoff *= 2
                 attempt += 1
+            else:
+                return response.model_copy(update={"attempts": attempt})

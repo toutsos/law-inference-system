@@ -49,6 +49,7 @@ def test_an_answer_cannot_be_edited_after_it_is_built() -> None:
             tokens_out=11,
             duration_seconds=0.24,
             finish_reason="stop",
+            attempts=1,
         ),
     )
 

@@ -16,5 +16,6 @@ def answer_question(question: Question, client: LLMClient) -> Answer:
             tokens_out=response.tokens_out,
             duration_seconds=response.duration_seconds,
             finish_reason=response.finish_reason,
+            attempts=response.attempts,
         ),
     )

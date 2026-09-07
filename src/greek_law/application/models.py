@@ -26,6 +26,7 @@ class AnswerMetadata(BaseModel):
     tokens_out: int
     duration_seconds: float
     finish_reason: FinishReason
+    attempts: int
 
 
 class Answer(BaseModel):

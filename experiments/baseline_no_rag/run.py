@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from greek_law.application import Question, answer_question
-from greek_law.cli import build_client
+from greek_law.compositions import build_client
 from greek_law.config import Settings
 from greek_law.llm.client import LLMClient
 from greek_law.llm.errors import LLMError

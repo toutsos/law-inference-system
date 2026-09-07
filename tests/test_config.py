@@ -84,3 +84,20 @@ def test_ollama_model_can_be_overridden_by_env_var(monkeypatch):
     settings = Settings(_env_file=None)
 
     assert settings.ollama_model == "qwen3:30b"
+
+
+def test_the_ollama_port_default_is_the_conventional_one(monkeypatch):
+    """The committed default is Ollama's documented port, not this machine's.
+
+    A default is what every other machine gets: CI, a teammate, a container in
+    V3's docker-compose. 11435 is one developer's local override and belongs in
+    .env, which is gitignored. Shipping it as the default means a fresh clone
+    fails to reach a correctly-installed Ollama, and — the subtler cost — every
+    committed baseline results file records base_url from Settings, so the odd
+    port gets written into the evidence as if it were the norm.
+    """
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.ollama_base_url == "http://localhost:11434"

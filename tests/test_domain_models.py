@@ -162,6 +162,28 @@ def test_retrieval_key_stays_in_the_greek_alphabet(act_identity):
     assert reference.key == "Ν.4808/2021/άρθρο-3Α/παρ-2/περ-α"
 
 
+def test_a_multi_word_article_number_produces_a_key_with_no_whitespace():
+    """Spelled-out article numbers slug into the key instead of keeping spaces.
+
+    Not hypothetical: ν. 5110/2024 ratifies a καταστατικό whose articles are
+    written out — «Άρθρο δέκατο πέμπτο» — so the V3 corpus produces these on the
+    first ingest. `key` is documented as a flat identifier for the vector store,
+    and a whitespace-bearing id is the kind of thing a store accepts on write
+    and mangles on read: URL-encoded in one code path, split on whitespace in
+    another, so the provision is indexed under one id and looked up under
+    another. Retrieval then returns nothing for exactly the articles a citation
+    question is most likely to ask about.
+    """
+    reference = SourceReference(
+        act=ActIdentity(act_type="ν.", number="5110", year=2024),
+        article="δέκατο πέμπτο",
+        paragraph="1",
+    )
+
+    assert reference.key == "ν.5110/2024/άρθρο-δέκατο-πέμπτο/παρ-1"
+    assert " " not in reference.key
+
+
 def test_key_is_derived_and_cannot_be_set(act_identity):
     """`key` is computed from the structure and rejects being passed in.
 

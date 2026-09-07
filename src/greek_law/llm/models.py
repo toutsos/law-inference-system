@@ -22,3 +22,4 @@ class ChatResponse(BaseModel):
     tokens_in: int
     tokens_out: int
     duration_seconds: float
+    attempts: int = 1

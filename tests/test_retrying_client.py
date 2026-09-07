@@ -67,6 +67,12 @@ def test_a_transient_failure_is_retried_and_the_later_success_is_returned() -> N
     swallowing the eventual response, or re-raising after a successful retry —
     all of which turn a recovered call into a failed one, which is worse than
     not retrying at all because it also burns the latency.
+
+    The comparison is against the whole response with only ``attempts`` updated,
+    not against a handful of fields: that pins what the wrapper is *allowed* to
+    change. A future version that rewrote the content, re-rounded the duration
+    or reset the token counts on its way out would still satisfy any
+    field-by-field check written today.
     """
     inner = FlakyLLMClient(
         _A_RESPONSE,
@@ -76,7 +82,7 @@ def test_a_transient_failure_is_retried_and_the_later_success_is_returned() -> N
 
     response = _retrying(inner, sleep).chat(_one_message())
 
-    assert response == _A_RESPONSE
+    assert response == _A_RESPONSE.model_copy(update={"attempts": 3})
     assert inner.calls == 3
     assert len(sleep.delays) == 2
 
@@ -179,4 +185,42 @@ def test_the_wall_clock_budget_stops_retrying_before_it_is_exceeded() -> None:
         _retrying(inner, sleep, budget_seconds=0.0).chat(_one_message())
 
     assert inner.calls == 1
+    assert sleep.delays == []
+
+
+def test_the_response_records_how_many_attempts_it_actually_took() -> None:
+    """A call that succeeded on attempt three comes back stamped attempts=3.
+
+    duration_seconds is measured around one attempt, so a retried call reports
+    the latency of the winning attempt and hides the two that failed. That
+    number is now published evidence — the baseline results files quote it, and
+    tokens/second was derived from it. Without an attempt count nothing in the
+    record can distinguish a fast call from a slow one that got lucky on its
+    third try, and the error is always in the reassuring direction.
+    """
+    sleep = RecordingSleep()
+    flaky = FlakyLLMClient(
+        _A_RESPONSE, [LLMUnavailableError("503"), LLMTimeoutError("timeout")]
+    )
+
+    response = _retrying(flaky, sleep).chat(_one_message())
+
+    assert response.attempts == 3
+    assert flaky.calls == 3
+
+
+def test_a_first_time_success_is_stamped_attempts_one() -> None:
+    """The happy path reports attempts=1, not an absent or zero count.
+
+    Every record in a results file carries this field, so the common case must
+    be a real number rather than a default nobody set. Catches a stamp applied
+    only inside the except branch, which would leave successful calls claiming
+    whatever ChatResponse's default happened to be and make the field useless
+    for spotting how often retries fire in practice.
+    """
+    sleep = RecordingSleep()
+
+    response = _retrying(FlakyLLMClient(_A_RESPONSE, []), sleep).chat(_one_message())
+
+    assert response.attempts == 1
     assert sleep.delays == []
