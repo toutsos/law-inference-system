@@ -1,0 +1,37 @@
+{
+  "manifest_version": 1,
+  "documents": [
+    {
+      "id": "fek_a_75_2024",
+      "act": {
+        "act_type": "ν.",
+        "number": "5110",
+        "year": 2024,
+        "fek": "Α' 75/24.05.2024"
+      },
+      "title": "Ίδρυση Ελληνικού Κέντρου Αμυντικής Καινοτομίας, εκσυγχρονισμός θεσμικού πλαισίου των Ανωτάτων Στρατιωτικών Εκπαιδευτικών Ιδρυμάτων, σύσταση Κοινού Σώματος Πληροφορικής στις Ένοπλες Δυνάμεις και λοιπές διατάξεις.",
+      "file": "data/raw/20240100075.pdf",
+      "sha256": "bc8d145da98bf3f992659b051a985ea3abc9c38a4d8e382cf4eeaa3e4c9214ce",
+      "size_bytes": 521319,
+      "source_url": "https://ia37rg02wpsa01.blob.core.windows.net/fek/01/2024/20240100075.pdf",
+      "retrieved_on": "2026-09-07",
+      "note": "The document V1's no-RAG baseline was written against; experiments/baseline_no_rag/questions.json transcribes ten of its provisions as ground truth. Άρθρο 13 ratifies a ΚΑΤΑΣΤΑΤΙΚΟ with its own spelled-out article numbering — the counterexample step 5 has to handle."
+    },
+    {
+      "id": "fek_a_121_2025",
+      "act": {
+        "act_type": "π.δ.",
+        "number": "62",
+        "year": 2025,
+        "fek": "Α' 121/11.07.2025"
+      },
+      "title": "Κώδικας Εργατικού Δικαίου.",
+      "file": "data/raw/20250100121.pdf",
+      "sha256": "c1468c507d5bb7720782984af44597e4db7fed9a50f55b978739b7ea1a4ac9dd",
+      "size_bytes": 2488180,
+      "source_url": "https://ia37rg02wpsa01.blob.core.windows.net/fek/01/2025/20250100121.pdf",
+      "retrieved_on": "2026-09-14",
+      "note": "The V0 corpus choice. 260 pages, real text layer, five container levels including ΥΠΟΚΕΦΑΛΑΙΟ, and a πίνακας περιεχομένων in the opening pages that a naive «Άρθρο N» regex turns into phantom articles."
+    }
+  ]
+}

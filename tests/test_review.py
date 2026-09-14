@@ -33,7 +33,7 @@ _THE_QUESTIONS = {
     "source": {
         "law": "ν. 5110/2024",
         "fek": "Α' 75/24.05.2024",
-        "file": "data/raw/fek_a_75_2024.pdf",
+        "corpus_document_id": "fek_a_75_2024",
     },
     "questions": [
         {

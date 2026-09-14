@@ -53,6 +53,7 @@ init_forbid_extra = true
 [tool.poe.tasks]
 test = "python -m pytest"
 ask = "python -m greek_law"
+corpus = "python -m greek_law.ingestion.verify"
 baseline = "python -m experiments.baseline_no_rag.run"
 review = "python -m experiments.baseline_no_rag.review"
 

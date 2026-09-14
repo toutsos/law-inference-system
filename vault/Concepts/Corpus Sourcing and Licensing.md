@@ -25,9 +25,30 @@ The underlying text is free, but their *codification, structuring, cross-linking
 
 **Rule for this project: ingest only from the official source (`et.gr` / `search.et.gr`).** Aggregators may be used to *find* which ΦΕΚ to fetch, and to eyeball a parse for correctness — never as the ingested text.
 
+## 2b. The site's terms are a third layer — added 2026-09-14
+
+Sections 1 and 2 answer "who owns the words". They do not answer "what did you agree to by downloading them". The **Όροι Χρήσης of `search.et.gr`** (`https://search.et.gr/el/oroi-xrisis/`) are a contract with the service, and they bind even though the text they deliver is public domain:
+
+- **§1.2** — «Οι χρήστες έχουν πρόσβαση και χρησιμοποιούν τον Ιστότοπο **αποκλειστικά για προσωπικούς, πληροφοριακούς, μη εμπορικούς σκοπούς**.»
+- **§2.4** — «Απαγορεύεται η **αναπαραγωγή του περιεχομένου του διαδικτυακού τόπου για εμπορικούς σκοπούς ή/και για μη προσωπική χρήση**… Υλικό από τον διαδικτυακό τόπο δεν επιτρέπεται να πωληθεί ή να διανεμηθεί με οποιονδήποτε άλλο τρόπο για κερδοσκοπικούς λόγους.»
+
+The three layers resolve independently, and the strictest one wins in practice:
+
+| Layer | Source | Says |
+| --- | --- | --- |
+| Copyright in the text | ν. 2121/1993 άρθρο 2 §5 | No protection. Quote it freely, at any length. |
+| Right in the compilation | ν. 2121/1993 άρθρο 45Α | Belongs to whoever built the database — which is why aggregators are out. |
+| Terms of the service used to obtain it | `search.et.gr` Όροι Χρήσης §1.2, §2.4 | Personal, informational, non-commercial. No redistribution of what you pulled. |
+
+**The practical rule this produces:** a downloaded ΦΕΚ never enters git. Quoting a provision in an answer is fine at every layer — that is the copyright question, and it is settled. Committing the corpus is not, and the reason is the third layer alone. It is also why this project's educational, non-commercial framing in [[Home]] is load-bearing rather than decorative: change that and the download itself falls outside §1.2.
+
+**The generalisable mistake to avoid:** "the content is public domain" and "I may republish what I downloaded" are different claims, and the first does not imply the second. The same split appears with permissively-licensed code behind a restrictive API, and with public data behind a terms-bound portal.
+
 ## 3. The primary source
 
 **Εθνικό Τυπογραφείο** — `search.et.gr` (simple, advanced and semantic search over ΦΕΚ). Free PDF download of any issue.
+
+**Reachability, checked 2026-09-14:** the ΦΕΚ search on `search.et.gr` is a front end for `nationalprintinghousefek.azurewebsites.net`, which did not resolve from the development machine's network on that date; `et.gr/api/DownloadFek/` returns 404. "Free PDF download of any issue" is therefore the policy, not a verified HTTP route — see the note in [[V2 - Document Ingestion]] for the commands that re-check it.
 
 Accepted cost, carried into [[V2 - Document Ingestion]]: ΦΕΚ are **PDFs, not structured text**. Layout is two-column with headers, footers, page numbers and digital signature blocks that must be stripped. Whether a given issue has a usable text layer or needs OCR must be checked per document before committing to it — an unverified assumption here would be discovered halfway through building the parser.
 
