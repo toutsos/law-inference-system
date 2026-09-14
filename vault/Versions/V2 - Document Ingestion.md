@@ -1,6 +1,6 @@
 Part of [[Home]]. See [[Agent Instructions]] for how decisions/tools/checklist should be maintained.
 
-**Status:** In Progress — started 2026-09-14. Steps 1–3 done (2026-09-14). Extraction is `greek_law.ingestion.extraction` on **pypdf**, chosen by measurement — see the Decisions and the Notes. Next: step 4, normalization, which now has a measured target list rather than a predicted one. **One document is already in `data/raw/` and is not optional**: ν. 5110/2024 (ΦΕΚ Α' 75/24.05.2024) is the law [[V1 - Minimal LLM Application]]'s baseline questions were written against, so [[V3 - First RAG System]]'s comparison depends on this version ingesting it. See the note on step 5 — it breaks an assumption the domain model currently makes.
+**Status:** In Progress — started 2026-09-14. **Steps 1–3 done; stopped here 2026-09-14.** Extraction is `greek_law.ingestion.extraction` on **pypdf**, chosen by measurement. **Step 4 is designed and measured but not built** — the character-level half is specified in full below ("Step 4, prepared but not built"), ready to implement without re-deriving anything. Resume there. **One document is already in `data/raw/` and is not optional**: ν. 5110/2024 (ΦΕΚ Α' 75/24.05.2024) is the law [[V1 - Minimal LLM Application]]'s baseline questions were written against, so [[V3 - First RAG System]]'s comparison depends on this version ingesting it. See the note on step 5 — it breaks an assumption the domain model currently makes.
 
 ## Goal
 
@@ -34,6 +34,7 @@ First text extraction from `data/raw/20250100121.pdf` (named `fek-a-121-2025.pdf
 
 ## Decisions
 
+- **2026-09-14 (step 4, decided before building): normalization returns the same type, not a `NormalizedDocument`.** The learner's call. The stated reason — not keeping the corpus twice — does not survive measurement: the whole corpus as text is **2.52 MiB**, so a second copy is noise. The reason that does hold is the stronger form of the same instinct: **two types describing the same data is two schemas to keep in agreement, and a standing question about which one is the truth.** A literal in-place mutation was not available anyway — `ExtractedPage` is `frozen=True` per [[Immutable Domain Models]], and unfreezing a recorded decision to save 2.5 MiB is a bad trade. So `normalize_document(ExtractedDocument) -> ExtractedDocument` via `model_copy`, raw text collected the moment it returns, only the normalized form persisted. **Accepted cost, stated so it is not discovered later: nothing in the type system says whether a document has been normalized.** Pipeline order carries that guarantee instead — `extract_document` is always followed by `normalize_document`, and nothing between them inspects the text.
 - **2026-09-14 (step 3): pypdf, not pdfplumber.** Measured, not assumed — the probe ran both over body pages of both corpus documents. **pdfplumber's `extract_text()` splices the two ΦΕΚ columns**: it sorts words by (top, left) across the whole page, so line 1 of the left column and line 1 of the right column come back as one line. `layout=True` does not fix it — it renders the page onto a fixed-width character canvas, preserving the look and therefore the splice. pypdf preserved reading order on both documents, which matters because the two were produced by different toolchains (Distiller/PDFsharp vs. InDesign/Adobe PDF Library), so a single success would have proved nothing. **The failure mode is why this decision is worth the time it took**: spliced text is fluent, correctly accented Greek that nothing flags and that says something nobody wrote — the ingestion-layer twin of V1's finding that fabricated citations resolve.
 - **2026-09-14 (step 3): the correctness pypdf gives is not controllable, and that is accepted with a named trigger.** pypdf emits text in PDF *content-stream* order; it performs no layout analysis, so there is no setting to verify and no way to check its answer. pdfplumber's offer is the inverse — wrong by default, but word coordinates make cropping into columns *checkable*. Declined because paying for controllability means writing and maintaining column detection to fix a problem pypdf does not currently have. **Revisit the day a ΦΕΚ extracts out of order**; `pages_with_suspicious_line_width` exists to make that day visible rather than silent.
 - **2026-09-14 (step 3): the test suite stays fast, and the one test that opens a real PDF is marked `slow` and excluded by default.** Reading the 260-page π.δ. takes 4.77 s against a whole-suite time of 0.18 s. That speed is load-bearing, not vanity: V1's architecture review was done by *reading* the code, which is only affordable when running the tests is free. `poe test` excludes the marker, `poe test-all` includes it — surefire vs. failsafe, or JUnit's `@Tag` excluded from the default profile.
@@ -153,5 +154,64 @@ So the manual step is *identification*, not *download* — which is a much small
 **It already earned its keep.** Over both documents: median width 51.0 each, no flags on the 260-page π.δ., and **one flag — page 60 of ν. 5110/2024**, the Εθνικό Τυπογραφείο colophon (Καποδιστρίου 34, phone numbers, `www.et.gr`), full-width boilerplate rather than law. A true positive for unusual layout and a requirement for step 4: **every ΦΕΚ ends with that page and it must be dropped.**
 
 **Step 4's target list is now measured rather than predicted:** confusable folding (U+2206 INCREMENT for Δ, U+0054 LATIN T for Τ), de-hyphenation in its two observed shapes (`ερ-\nγοδότη` and `δι -\nμήνου`), per-page header removal whose *shape differs per document* (the ν. 5110 header arrives as one line with the page number glued on, the π.δ.'s as three separate lines), and the trailing colophon page.
+
+### Step 4, prepared but not built — 2026-09-14
+
+Work stopped after step 3. The character-level half of step 4 was designed, measured against the real corpus and test-run, then **deliberately not committed** so that the repository's stopping point is green. Everything needed to build it is here; nothing has to be re-derived.
+
+**Split the step in two.** Character-level (NFC + confusable folding) is one pass that needs to know only about characters. Line-level (whitespace, de-hyphenation, running headers, the colophon page) is a second pass that needs to know about lines and pages. Building them as one function would mix two kinds of reasoning in one place.
+
+#### The full confusable census of the corpus
+
+Every non-Greek character appearing inside a Greek word, with the real tokens — this is what the fold rule has to satisfy, and it is why a plain character map is wrong:
+
+| Char | Count | Real tokens | Correct action |
+| --- | ---: | --- | --- |
+| `T` U+0054 | 263 | `TΗΣ`, `Tμήμα`, `Tμήματος`, `Tο`, `ΣT’` | fold → `Τ` |
+| `∆` U+2206 | 60 | `ΕΦΗΜΕΡΙ∆Α`, `∆ΗΜΟΚΡΑΤΙΑΣ` | fold → `Δ` |
+| `e` U+0065 | 33 | `e-Ε.Φ.Κ.Α.`, `(e-Ε.Φ.Κ.Α.)` | **leave** — genuinely Latin |
+| `I` U+0049 | 5 | `ΔΙΑΚΡIΣΕΩΝ`, `Α.Σ.Ε.I.`, `IΙΙ`, `ΙΙI` | fold → `Ι` |
+| `A` U+0041 | 4 | `ΚΕΦAΛΑΙΟ`, `Aυτοτελές`, `Aνώτα-` | fold → `Α` |
+| `o` U+006F | 4 | `στo`, `στoν`, `πλαίσιo` | fold → `ο` |
+| U+0301 | 12 | `Μαΐου` | NFC alone fixes it |
+| `C R U D E` | 8 | `(ΑCCRUED` | **fold the other way** — Greek `Α` → Latin `A` |
+| `i g` | 2 | `(Βig` | **fold the other way** — Greek `Β` → Latin `B` |
+| `V` U+0056 | 1 | `ΙV` | leave — Greek has no V |
+| `{ }` | 2 | `{εγγυημένο`, `παροχή},` | leave — real punctuation |
+
+`(ΑCCRUED` and `(Βig` are the finding that kills the obvious design: **English words whose first letter is Greek.** A one-directional Latin→Greek map turns them into tokens that are neither language.
+
+#### The rule that satisfies all of it
+
+**Decide per maximal run of letter-like characters, not per whitespace token.** Within a run, count Greek against Latin; the majority script wins; ties go to Greek; characters with no counterpart in the winning script are left alone.
+
+The run boundary is the whole design. `e-Ε.Φ.Κ.Α.` and `ΚΕΦAΛΑΙΟ` are both "a lone Latin letter surrounded by Greek", and only the boundary at the hyphen separates the case that must be protected from the case that must be fixed.
+
+Two further points that are easy to get wrong:
+
+- **`"∆".isalpha()` is `False`.** U+2206 is a mathematical symbol, so "letter-like" must mean *isalpha or in the fold table*. Any rule built on character classes alone walks past all 60 occurrences — the character that most needs fixing does not identify as a letter.
+- **NFC runs before the fold, never after.** Combining marks belong to no script and would skew the majority count.
+
+The fold table is confined to the homoglyphs actually observed plus the uncontroversial uppercase set, and deliberately excludes `n`/`η`, `u`/`υ`, `y`/`γ` — they look like pairs but are not reliable. **The asymmetry is the justification: a wrong fold corrupts text silently; a missing one only leaves a token unmatched.**
+
+#### Verified behaviour, before it was rolled back
+
+Run over both corpus documents: **338 characters changed out of 1.48 M** — `T→Τ` ×263, `∆→Δ` ×60, 13 single-letter fixes, and **two inverse folds** (`Β→B`, `Α→A`). Cost ~1.2 s for the corpus. Residue afterwards, all known-safe: `e` ×33, `I` ×1, `V` ×1.
+
+Two known misses, both false negatives rather than corruptions, and both accepted:
+
+- `Α.Σ.Ε.I.` keeps its Latin `I`, because the full stops cut the acronym into single-character runs. The *same* mechanism is what protects `e-Ε.Φ.Κ.Α.`, so fixing it would put that at risk for one token class.
+- `ΙV` stays mixed, correctly — it is a Roman numeral and Greek has no V.
+
+Because they are accepted rather than solved, a `residual_confusables()` counter reports what the fold left. **Silence there would read as "nothing left to fix" rather than "not attempted"**, and the next person would then trust exact matching on tokens that are still mixed-script.
+
+#### What the line-level half faces
+
+Already observed and not yet solved:
+
+- **The running header has a different shape per document.** ν. 5110/2024 extracts it as one glued line — `ΕΦΗΜΕΡΙ∆Α  T ΗΣ ΚΥΒΕΡΝΗΣΕΩΣ3188 Τεύχος A’ 75/24.05.2024`, with the gazette page number fused to the preceding word. π.δ. 62/2025 extracts it as three separate lines. **Two documents are already enough to prove the rule cannot be positional**, which is the same lesson step 5 will need for article numbering.
+- **De-hyphenation has two shapes in one paragraph**: `ερ-\nγοδότη` and `δι -\nμήνου` (space before the hyphen). A rule matching `-\n` alone silently leaves the second broken.
+- **The gazette page number must be recovered, not just deleted.** It is inside the header being stripped, and [[V6 - Legal Structure and Citations]] needs it: PDF page 6 of ν. 5110/2024 prints «3188».
+- **The last page of every ΦΕΚ is the Εθνικό Τυπογραφείο colophon** and must be dropped — found by the step 3 width guard rather than by looking for it.
 
 _Freeform notes, gotchas, links, technical debt._
