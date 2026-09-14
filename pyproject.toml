@@ -11,6 +11,7 @@ dependencies = [
     "httpx>=0.28.1",
     "pydantic>=2.13.4",
     "pydantic-settings>=2.15.0",
+    "pypdf>=6.18.1",
 ]
 
 [build-system]
@@ -46,6 +47,10 @@ module = ["tests.*"]
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 
+[[tool.mypy.overrides]]
+module = ["pdfplumber.*"]
+ignore_missing_imports = true
+
 [tool.pydantic-mypy]
 init_typed = true
 init_forbid_extra = true
@@ -56,6 +61,7 @@ ask = "python -m greek_law"
 corpus = "python -m greek_law.ingestion.verify"
 baseline = "python -m experiments.baseline_no_rag.run"
 review = "python -m experiments.baseline_no_rag.review"
+test-all = "python -m pytest -m ''"
 
 [tool.poe.tasks.typecheck]
 help = "Static type check — the closest thing Python has to javac"
@@ -74,3 +80,5 @@ default_item_type = "cmd"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+addopts = "-m 'not slow'"
+markers = ["slow: opens the real corpus on disk; excluded from `poe test`"]
