@@ -1,0 +1,451 @@
+"""Character-level normalization: NFC plus script-aware confusable folding.
+
+Almost every string in this file is a real token from the corpus, taken from
+the confusable census in the V2 note (step 4). Synthetic examples would prove
+the function does what it was written to do; these prove it does what the two
+ΦΕΚ in `data/raw/` actually require. The one constructed token says so in its
+own docstring.
+"""
+
+import unicodedata
+
+import pytest
+
+from greek_law.ingestion import DEFAULT_MANIFEST_PATH, load_manifest
+from greek_law.ingestion.extraction import (
+    ExtractedDocument,
+    ExtractedPage,
+    extract_document,
+)
+from greek_law.ingestion.normalization import (
+    normalize_characters,
+    normalize_document,
+    residual_confusables,
+    strip_running_header,
+)
+
+INCREMENT = "∆"
+"""MATHEMATICAL INCREMENT — what stands in for Δ in ν. 5110/2024's header."""
+
+
+def test_a_decomposed_vowel_is_composed() -> None:
+    """«Μαΐου» written as iota + combining acute comes back precomposed.
+
+    Greek has two encodings for every accented vowel. Both render identically,
+    so a corpus holding one and a query holding the other look equal to a human
+    and unequal to `==`, to a BM25 index and to a database. V5's lexical
+    retrieval would miss the provision and report no match rather than an
+    error — the failure nobody debugs because nothing looks broken.
+    """
+    decomposed = unicodedata.normalize("NFD", "Μαΐου")
+
+    assert decomposed != "Μαΐου", "fixture is not actually decomposed"
+    assert normalize_characters(decomposed) == "Μαΐου"
+
+
+def test_composition_happens_before_the_fold_not_after() -> None:
+    """A combining mark does not split the word it sits in.
+
+    A combining mark is not alphabetic, so it ends a letter-like run: on
+    decomposed input the fold would see «AΒι» and «ΓΔΕΖ» as two words, count
+    two Latin letters against one Greek in the first, and resolve it *to Latin*
+    — rewriting the Greek ι as `i`. One Greek letter in, one Latin letter out,
+    from a word that is plainly Greek when read whole. The token is constructed
+    rather than quoted: the mechanism is what matters, and the consequence is
+    that the fold decides a word's script on the strength of half its letters.
+    """
+    decomposed = unicodedata.normalize("NFD", "ABΐΓΔΕΖ")
+
+    assert normalize_characters(decomposed) == unicodedata.normalize("NFC", "ΑΒΐΓΔΕΖ")
+
+
+def test_the_increment_sign_folds_to_greek_delta() -> None:
+    """«ΕΦΗΜΕΡΙ∆Α» with a maths operator comes back as Greek «ΕΦΗΜΕΡΙΔΑ».
+
+    This is the most common confusable in the corpus (60 occurrences) and the
+    one a rule built on character classes walks straight past: U+2206 is
+    category Sm, so `"∆".isalpha()` is False. Left in place it poisons the
+    running header on every page of ν. 5110/2024, and any later rule that
+    strips the header by matching on «ΕΦΗΜΕΡΙΔΑ» fails on that document only.
+    """
+    assert normalize_characters("ΕΦΗΜΕΡΙ" + INCREMENT + "Α") == "ΕΦΗΜΕΡΙΔΑ"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("ΚΕΦAΛΑΙΟ", "ΚΕΦΑΛΑΙΟ"),
+        ("Tμήματος", "Τμήματος"),
+        ("στoν", "στον"),
+        ("ΔΙΑΚΡIΣΕΩΝ", "ΔΙΑΚΡΙΣΕΩΝ"),
+        ("IΙΙ", "ΙΙΙ"),
+    ],
+)
+def test_a_latin_letter_inside_a_greek_word_folds_to_greek(
+    raw: str, expected: str
+) -> None:
+    """Greek words typeset with a stray Latin homoglyph come back all Greek.
+
+    Each of these is a real token from the corpus. `ΚΕΦAΛΑΙΟ` is the dangerous
+    one: step 5 finds structural headings by matching «ΚΕΦΑΛΑΙΟ», so a Latin
+    `A` in one heading drops a whole chapter of the Κώδικας Εργατικού Δικαίου
+    out of the parsed hierarchy — not with an error, with a smaller tree.
+    """
+    assert normalize_characters(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("(ΑCCRUED", "(ACCRUED"), ("(Βig", "(Big")],
+)
+def test_a_greek_letter_inside_an_english_word_folds_the_other_way(
+    raw: str, expected: str
+) -> None:
+    """English words whose first letter is Greek are repaired towards Latin.
+
+    These two tokens are why the fold is not a Latin-to-Greek character map.
+    Such a map would produce «ΑΓΓΡΥΕΔ»-shaped garbage: a token in no language,
+    matching neither a Greek query nor an English one, and unrecognisable to
+    the human reading the output during step 10's manual QA.
+    """
+    assert normalize_characters(raw) == expected
+
+
+def test_a_latin_word_hyphenated_onto_a_greek_acronym_is_left_alone() -> None:
+    """«e-Ε.Φ.Κ.Α.» keeps its Latin `e`.
+
+    The `e` is a genuine Latin letter in the official name of the service, and
+    it is surrounded by Greek. The hyphen is the only thing separating it from
+    `ΚΕΦAΛΑΙΟ`, which must be folded. Fold this one and the corpus no longer
+    contains the string a user types to find it.
+    """
+    assert normalize_characters("e-Ε.Φ.Κ.Α.") == "e-Ε.Φ.Κ.Α."
+
+
+def test_an_even_split_goes_to_greek() -> None:
+    """«ΣT’» — one Greek letter, one Latin — comes back Greek.
+
+    The corpus is Greek legislation, so an unresolvable tie is far more likely
+    to be a mis-typeset Greek word than an English one. Deciding ties towards
+    Latin would corrupt the enumerator «ΣΤ’», which labels paragraph lists
+    throughout both documents.
+    """
+    assert normalize_characters("ΣT’") == "ΣΤ’"
+
+
+def test_a_latin_letter_greek_does_not_have_is_kept() -> None:
+    """«ΙV» stays mixed, because Greek has no V.
+
+    The run resolves to Greek, and a fold that forced every character to the
+    winning script would have to invent a mapping for `V`. Roman numerals
+    appear in the corpus; silently rewriting one to a Greek lookalike would
+    change a cross-reference's meaning.
+    """
+    assert normalize_characters("ΙV") == "ΙV"
+
+
+def test_an_acronym_cut_into_single_letters_is_not_folded() -> None:
+    """«Α.Σ.Ε.I.» keeps its Latin `I` — an accepted miss, pinned on purpose.
+
+    The full stops cut the acronym into one-character runs, and a lone Latin
+    letter is read as Latin. This is a false negative, not a corruption, and
+    the exact same mechanism is what protects `e-Ε.Φ.Κ.Α.` above. The test
+    exists so that anyone who later "fixes" it is told, by a failing test,
+    which protection they are trading away.
+    """
+    assert normalize_characters("Α.Σ.Ε.I.") == "Α.Σ.Ε.I."
+
+
+def test_digits_punctuation_and_whitespace_survive_unchanged() -> None:
+    """Everything that is not letter-like passes through byte for byte.
+
+    Normalization runs before parsing, so it sees «Άρθρο 13» and «παρ. 2»
+    before anything has read them. A fold that touched digits, braces or
+    newlines would corrupt article numbers and page geometry at the one point
+    in the pipeline where there is no way left to check them against the PDF.
+    """
+    raw = "Άρθρο 13\n{εγγυημένο}  παροχή},\t«ΦΕΚ» Α’ 75/24.05.2024\n"
+
+    assert normalize_characters(raw) == raw
+
+
+def test_residual_confusables_reports_what_the_fold_deliberately_left() -> None:
+    """The Latin letters still sitting in Greek words are counted, not hidden.
+
+    Two misses are accepted by design (above), so the pipeline must say so out
+    loud. Silence here would read as "nothing left to fix" rather than "not
+    attempted", and the next person would trust exact matching on tokens that
+    are still mixed-script.
+    """
+    folded = normalize_characters("ΙV και ΙΙΙ")
+
+    assert residual_confusables(folded) == {"V": 1}
+
+
+def test_fully_folded_text_has_no_residue() -> None:
+    """Text the fold could repair completely reports an empty counter.
+
+    If the counter reported leftovers for text that is already clean, it would
+    cry wolf on every run and stop being read — which is the same outcome as
+    not having it.
+    """
+    assert residual_confusables(normalize_characters("ΚΕΦAΛΑΙΟ Β")) == {}
+
+
+def test_residual_confusables_counts_tokens_not_just_mixed_words() -> None:
+    """«e-Ε.Φ.Κ.Α.» reports its `e`, even though the fold was right to keep it.
+
+    Both accepted misses are single-script *runs* inside a mixed-script
+    *token* — which is precisely why the fold left them alone. A counter that
+    looked at runs rather than whitespace tokens would therefore report zero
+    residue for exactly the cases it exists to surface, and V5 would index a
+    token no Greek query matches while the pipeline said nothing was left.
+    """
+    assert residual_confusables(normalize_characters("e-Ε.Φ.Κ.Α.")) == {"e": 1}
+
+
+def _document(*texts: str) -> ExtractedDocument:
+    return ExtractedDocument(
+        document_id="synthetic",
+        pages=[
+            ExtractedPage(number=number, text=text)
+            for number, text in enumerate(texts, start=1)
+        ],
+    )
+
+
+def test_every_page_is_normalized_and_page_numbers_are_preserved() -> None:
+    """Each page's text is folded; `number` and `document_id` are untouched.
+
+    Page numbers are the spine of provenance: step 4's line pass recovers the
+    printed gazette number per page, and V6 cites it. A copy that renumbered
+    pages, or dropped one, would produce citations that are well-formed and
+    point at the wrong page — V1's fabricated-citation failure, one layer down.
+    """
+    document = _document("ΚΕΦAΛΑΙΟ", "ΕΦΗΜΕΡΙ" + INCREMENT + "Α")
+
+    normalized = normalize_document(document)
+
+    assert normalized.document_id == "synthetic"
+    assert [page.number for page in normalized.pages] == [1, 2]
+    assert [page.text for page in normalized.pages] == ["ΚΕΦΑΛΑΙΟ", "ΕΦΗΜΕΡΙΔΑ"]
+
+
+def test_the_original_document_is_not_modified() -> None:
+    """Normalization returns a new document and leaves its input intact.
+
+    The V2 decision is that normalization returns the same *type* rather than a
+    `NormalizedDocument`, so nothing in the type system distinguishes raw text
+    from normalized text — pipeline order carries that guarantee. The copy is
+    what keeps that honest: if normalization mutated in place, a caller holding
+    what it believes is raw text would be holding folded text instead, and no
+    test downstream could tell.
+    """
+    document = _document("ΚΕΦAΛΑΙΟ")
+
+    normalize_document(document)
+
+    assert document.pages[0].text == "ΚΕΦAΛΑΙΟ"
+
+
+@pytest.mark.slow
+def test_the_real_corpus_folds_down_to_three_known_safe_characters() -> None:
+    """Over both ΦΕΚ, the only residue is `e`, `I` and `V`.
+
+    The unit tests above check the rule against hand-picked tokens; this one
+    checks that no *other* confusable is hiding in 1.48 M characters of real
+    gazette text. A new document whose typesetter reached for a different
+    homoglyph — or a fold table edited without re-measuring — shows up here as
+    an unexpected character rather than as mis-matched queries in V5.
+    """
+    manifest = load_manifest(DEFAULT_MANIFEST_PATH)
+
+    residue: dict[str, int] = {}
+    for document in manifest.documents:
+        normalized = normalize_document(extract_document(document))
+        for page in normalized.pages:
+            for character, count in residual_confusables(page.text).items():
+                residue[character] = residue.get(character, 0) + count
+
+    assert set(residue) <= {"e", "I", "V"}, residue
+
+
+ONE_LINE_HEADER = "ΕΦΗΜΕΡΙΔΑ  T ΗΣ ΚΥΒΕΡΝΗΣΕΩΣ3188 Τεύχος A’ 75/24.05.2024"
+"""ν. 5110/2024, PDF page 6: the whole header on one line, number glued on."""
+
+THREE_LINE_HEADER = "ΕΦΗΜΕΡΙΔΑ ΤΗΣ ΚΥΒΕΡΝΗΣΕΩΣ\n2924\nΤεύχος A’ 121/11.07.2025"
+"""π.δ. 62/2025, PDF page 60: the same furniture, extracted as three lines."""
+
+
+def test_a_one_line_header_is_removed_and_its_page_number_recovered() -> None:
+    """ν. 5110/2024's header goes, and «3188» comes back as data.
+
+    The gazette page number is inside the furniture being deleted, and V6 has to
+    cite it — PDF page 6 prints «3188». Delete the line without reading it and
+    the only remaining page number is the PDF index, which would produce
+    citations that are well-formed, confident and off by 3182.
+    """
+    page = f"{ONE_LINE_HEADER}\n4. Το συνδυασμένο ποσοστό της συμμετοχής"
+
+    assert strip_running_header(page) == (
+        3188,
+        "4. Το συνδυασμένο ποσοστό της συμμετοχής",
+    )
+
+
+def test_the_page_number_glued_to_the_following_word_is_recovered_too() -> None:
+    """«ΚΥΒΕΡΝΗΣΕΩΣ 3189Τεύχος» yields 3189, not 75 and not nothing.
+
+    The number fuses to whichever neighbour the typesetter left it next to, and
+    which side that is alternates with the left/right page layout — 30 of
+    ν. 5110/2024's pages glue it backwards, 28 forwards. A rule that found the
+    number by splitting on whitespace would work on half the document.
+    """
+    page = "ΕΦΗΜΕΡΙΔΑ  T ΗΣ ΚΥΒΕΡΝΗΣΕΩΣ 3189Τεύχος A’ 75/24.05.2024\nΆμυνας"
+
+    assert strip_running_header(page) == (3189, "Άμυνας")
+
+
+def test_a_three_line_header_is_removed_as_one_unit() -> None:
+    """π.δ. 62/2025's header spans three lines and all three go.
+
+    Two documents, two shapes, same furniture: this is the proof that the rule
+    cannot be "drop line 1". Anchoring on the issue stamp and deleting
+    everything above it handles both without either document being a special
+    case — and a positional rule would leave «2924» at the top of 259 pages,
+    where step 5 would read it as the start of a provision.
+    """
+    page = f"{THREE_LINE_HEADER}\nκαι Οικονομικών εισηγούνται"
+
+    assert strip_running_header(page) == (2924, "και Οικονομικών εισηγούνται")
+
+
+def test_the_fek_number_inside_the_stamp_is_not_read_as_the_page_number() -> None:
+    """«Τεύχος A’ 75/24.05.2024» contributes no digits to the page number.
+
+    The stamp is full of numbers — issue 75, and the date — and all of them sit
+    on the same line as the page number. Searching the whole line would return
+    2024, silently re-labelling every page of the document with the year.
+    """
+    number, _ = strip_running_header(f"{ONE_LINE_HEADER}\nκείμενο")
+
+    assert number == 3188
+
+
+def test_a_page_with_no_running_header_is_returned_untouched() -> None:
+    """The cover page keeps all of its text and reports no gazette number.
+
+    Page 1 of both documents carries the act's title — «ΝΟΜΟΣ ΥΠ’ ΑΡΙΘΜ. 5110»
+    — and no running header. A rule that assumed every page has one would eat
+    the title line, which is where step 5 reads the act's number from.
+    """
+    cover = "ΝΟΜΟΣ ΥΠ’ ΑΡΙΘΜ. 5110 \nΊδρυση Ελληνικού Κέντρου"
+
+    assert strip_running_header(cover) == (None, cover)
+
+
+def test_an_empty_page_is_handled() -> None:
+    """A blank page returns no number and no text, rather than raising.
+
+    PDF page 59 of ν. 5110/2024 is blank. Ingestion walks 320 pages
+    unattended, so one `IndexError` on an empty line list would abort the run
+    at page 59 of 60.
+    """
+    assert strip_running_header("") == (None, "")
+
+
+def test_an_issue_stamp_deep_in_the_body_is_not_treated_as_furniture() -> None:
+    """A stamp on the sixth line is body text and is kept.
+
+    Legislation quotes gazette references constantly. Without a bound on how
+    far down the page the header can be, a provision citing an issue would have
+    itself and every line above it deleted — the worst possible failure here,
+    because the deletion is invisible in the output.
+    """
+    body = "\n".join(
+        ["γραμμή " + str(n) for n in range(5)]
+        + ["όπως δημοσιεύθηκε σε Τεύχος A’ 75/24.05.2024"]
+    )
+
+    assert strip_running_header(body) == (None, body)
+
+
+def test_text_following_the_stamp_on_its_own_line_is_kept() -> None:
+    """Anything after the stamp survives, even though the corpus never has any.
+
+    Measured over all 317 header pages: nothing ever follows the stamp. The
+    branch exists because the two failure modes are not comparable — a leftover
+    header fragment is visible noise that step 10's read-through catches, while
+    a provision deleted because it shared a line with the header is gone with
+    no trace anywhere.
+    """
+    page = f"{ONE_LINE_HEADER} Άρθρο 1\nκείμενο"
+
+    assert strip_running_header(page) == (3188, "Άρθρο 1\nκείμενο")
+
+
+def test_normalize_document_records_the_gazette_page_on_each_page() -> None:
+    """Every page carries both numbers: the PDF index and the printed one.
+
+    They differ by a per-document offset that nothing in the file states, so
+    keeping only one of them makes the other unrecoverable. `gazette_page` is
+    `None` where there is no header, which is a page with no printed number
+    rather than a parse failure — the cover.
+    """
+    document = _document("ΝΟΜΟΣ ΥΠ’ ΑΡΙΘΜ. 5110", f"{ONE_LINE_HEADER}\nκείμενο")
+
+    pages = normalize_document(document).pages
+
+    assert [(page.number, page.gazette_page) for page in pages] == [
+        (1, None),
+        (2, 3188),
+    ]
+
+
+@pytest.mark.slow
+def test_the_printed_page_number_is_the_pdf_index_plus_a_fixed_offset() -> None:
+    """Across each ΦΕΚ, `gazette_page - number` is one constant.
+
+    The strongest check available without a human reading 320 pages. A header
+    parsed slightly wrongly — the issue number taken instead of the page
+    number, a glued digit dropped, a page's furniture missed — moves one page's
+    offset and nothing else, so it shows up here as two offsets where there
+    should be one.
+
+    Stated as an offset rather than as a consecutive run on purpose: PDF page 59
+    of ν. 5110/2024 is blank and therefore prints no number, so the recovered
+    numbers jump 3240 → 3242. A consecutiveness test would read that hole as a
+    parse error; the offset is indifferent to missing pages and still catches a
+    misread one. It also means the printed number of a blank page is derivable
+    if anything ever needs it.
+    """
+    manifest = load_manifest(DEFAULT_MANIFEST_PATH)
+
+    for document in manifest.documents:
+        offsets = {
+            page.gazette_page - page.number
+            for page in normalize_document(extract_document(document)).pages
+            if page.gazette_page is not None
+        }
+
+        assert len(offsets) == 1, (document.id, sorted(offsets))
+
+
+@pytest.mark.slow
+def test_header_removal_never_deletes_a_provision() -> None:
+    """No text removed as a running header contains «Άρθρο».
+
+    The sequence test above proves the *number* was read correctly; it says
+    nothing about how much text went with it. This pins the other half: if the
+    span ever grew to swallow body text the loss would be silent, and an
+    article heading is the cheapest marker that body text was in there.
+    """
+    manifest = load_manifest(DEFAULT_MANIFEST_PATH)
+
+    for document in manifest.documents:
+        for page in extract_document(document).pages:
+            folded = normalize_characters(page.text)
+            _, body = strip_running_header(folded)
+            removed = folded[: len(folded) - len(body)]
+
+            assert "Άρθρο" not in removed, (document.id, page.number)

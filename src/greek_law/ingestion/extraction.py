@@ -42,14 +42,17 @@ class ExtractedPage(BaseModel):
 
     ``number`` is the 1-based index **in the PDF**, which is not the printed
     gazette page number — PDF page 6 of ν. 5110/2024 carries "3188" in its
-    header. Citations need the printed one; recovering it means parsing the
-    header, which is step 4's problem, not this module's.
+    header. Citations need the printed one, and ``gazette_page`` is where it
+    lands; recovering it means parsing the header, so this module never fills
+    it. ``None`` therefore means "this page printed no number" — a cover, a
+    blank — or "normalization has not run yet", told apart by pipeline order.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     number: int
     text: str
+    gazette_page: int | None = None
 
 
 class ExtractedDocument(BaseModel):
