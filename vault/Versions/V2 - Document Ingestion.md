@@ -1,6 +1,6 @@
 Part of [[Home]]. See [[Agent Instructions]] for how decisions/tools/checklist should be maintained.
 
-**Status:** In Progress — started 2026-09-14. **Steps 1–4 done (2026-10-01).** Normalization is `greek_law.ingestion.normalization`: characters → running header → whitespace → colophon → de-hyphenation. Resume at step 5 (parse legal structure). Extraction is `greek_law.ingestion.extraction` on **pypdf**, chosen by measurement. **Step 4 is designed and measured but not built** — the character-level half is specified in full below ("Step 4, prepared but not built"), ready to implement without re-deriving anything. Resume there. **One document is already in `data/raw/` and is not optional**: ν. 5110/2024 (ΦΕΚ Α' 75/24.05.2024) is the law [[V1 - Minimal LLM Application]]'s baseline questions were written against, so [[V3 - First RAG System]]'s comparison depends on this version ingesting it. See the note on step 5 — it breaks an assumption the domain model currently makes.
+**Status:** In Progress — started 2026-09-14. **Steps 1–4 done (2026-10-01).** Normalization is `greek_law.ingestion.normalization`: characters → running header → whitespace → colophon → de-hyphenation. Resume at step 5 (parse legal structure). Extraction is `greek_law.ingestion.extraction` on **pypdf**, chosen by measurement. **One document is already in `data/raw/` and is not optional**: ν. 5110/2024 (ΦΕΚ Α' 75/24.05.2024) is the law [[V1 - Minimal LLM Application]]'s baseline questions were written against, so [[V3 - First RAG System]]'s comparison depends on this version ingesting it. See the note on step 5 — it breaks an assumption the domain model currently makes.
 
 ## Goal
 
@@ -166,9 +166,9 @@ So the manual step is *identification*, not *download* — which is a much small
 
 **Step 4's target list is now measured rather than predicted:** confusable folding (U+2206 INCREMENT for Δ, U+0054 LATIN T for Τ), de-hyphenation in its two observed shapes (`ερ-\nγοδότη` and `δι -\nμήνου`), per-page header removal whose *shape differs per document* (the ν. 5110 header arrives as one line with the page number glued on, the π.δ.'s as three separate lines), and the trailing colophon page.
 
-### Step 4, prepared but not built — 2026-09-14
+### Step 4's character pass, designed 2026-09-14 and built unchanged 2026-10-01
 
-Work stopped after step 3. The character-level half of step 4 was designed, measured against the real corpus and test-run, then **deliberately not committed** so that the repository's stopping point is green. Everything needed to build it is here; nothing has to be re-derived.
+_Kept as written. Work stopped after step 3; this half of step 4 was designed, measured against the real corpus and test-run, then **deliberately not committed** so the repository's stopping point stayed green. It was built on 2026-10-01 exactly as specified below — the design needed no revision, and the census table is still the reference for what the fold must satisfy. **The one thing measurement changed** is the unit `residual_confusables` counts (whitespace tokens, not letter runs — see the step 4c decision above). The re-measured numbers match this note's: 338 characters changed out of 1 480 894, residue `e ×33, I ×1, V ×1`._
 
 **Split the step in two.** Character-level (NFC + confusable folding) is one pass that needs to know only about characters. Line-level (whitespace, de-hyphenation, running headers, the colophon page) is a second pass that needs to know about lines and pages. Building them as one function would mix two kinds of reasoning in one place.
 
