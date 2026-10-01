@@ -18,9 +18,13 @@ from greek_law.ingestion.extraction import (
     extract_document,
 )
 from greek_law.ingestion.normalization import (
+    dehyphenate,
     normalize_characters,
     normalize_document,
+    normalize_whitespace,
     residual_confusables,
+    residual_line_hyphens,
+    strip_colophon,
     strip_running_header,
 )
 
@@ -449,3 +453,332 @@ def test_header_removal_never_deletes_a_provision() -> None:
             removed = folded[: len(folded) - len(body)]
 
             assert "Άρθρο" not in removed, (document.id, page.number)
+
+
+def test_a_no_break_space_becomes_an_ordinary_space() -> None:
+    """U+00A0 is folded to U+0020.
+
+    The corpus holds 2540 of them — «ΕΔΡΑ - ΣΚΟΠΟΣ», «(Β’ 3805)» — and
+    they are invisible in every editor. Two tokens separated by one would never
+    match a query typed with a normal space, which is the same silent
+    retrieval miss as a mis-encoded Δ, arriving through whitespace instead.
+    """
+    assert normalize_whitespace("ΕΔΡΑ - ΣΚΟΠΟΣ") == "ΕΔΡΑ - ΣΚΟΠΟΣ"
+
+
+def test_runs_of_spaces_collapse_but_line_breaks_survive() -> None:
+    """Horizontal whitespace collapses to one space; newlines are untouched.
+
+    Justified ΦΕΚ columns leave double spaces mid-line. Newlines must survive
+    the same pass, because de-hyphenation and step 5's structure detection both
+    read lines — collapsing `\\s+` wholesale would weld the document into one
+    line and destroy both.
+    """
+    assert normalize_whitespace("ΕΦΗΜΕΡΙΔΑ  T ΗΣ\nΆρθρο   13") == (
+        "ΕΦΗΜΕΡΙΔΑ T ΗΣ\nΆρθρο 13"
+    )
+
+
+def test_leading_and_trailing_space_is_stripped_per_line() -> None:
+    """Each line loses its edge whitespace.
+
+    Nearly every extracted body line ends with a space, so without this the
+    de-hyphenation check below would have to reason about trailing whitespace
+    on every comparison, and «γραμμή » and «γραμμή» would be different chunk
+    text for no reason a reader could see.
+    """
+    assert normalize_whitespace("  4. Το ποσοστό \n κείμενο  ") == (
+        "4. Το ποσοστό\nκείμενο"
+    )
+
+
+def _paged(*texts: str) -> list[ExtractedPage]:
+    return [
+        ExtractedPage(number=number, text=text)
+        for number, text in enumerate(texts, start=1)
+    ]
+
+
+def _texts(pages: list[ExtractedPage]) -> list[str]:
+    return [page.text for page in pages]
+
+
+def test_a_word_split_across_a_line_break_is_rejoined() -> None:
+    """«Καινοτομί-» + «ας,» becomes «Καινοτομίας,» on one line.
+
+    5065 words in the corpus are broken this way. Left split, each half is a
+    token that exists in no dictionary and matches no query: V5's lexical
+    search would never find «Καινοτομίας», and V3's embeddings would place the
+    two fragments nowhere near the concept.
+    """
+    page = "Ελληνικού Κέντρου Αμυντικής Καινοτομί-\nας, εκσυγχρονισμός"
+
+    assert _texts(dehyphenate(_paged(page))) == [
+        "Ελληνικού Κέντρου Αμυντικής Καινοτομίας,\nεκσυγχρονισμός"
+    ]
+
+
+def test_only_the_continuing_word_moves_not_the_whole_line() -> None:
+    """The remainder of the continuation line stays a line of its own.
+
+    Joining whole lines would be the conventional de-hyphenation, and across a
+    page boundary it would migrate a whole line of the next page's text onto
+    this one — a provision whose text is printed on gazette page 3189 cited as
+    3188. Moving only the token that finishes the word keeps provenance exact.
+    """
+    page = "τον διακριτι-\nκό τίτλο «ΕΛΚΑΚ ΑΕ», που εποπτεύεται"
+
+    assert _texts(dehyphenate(_paged(page))) == [
+        "τον διακριτικό\nτίτλο «ΕΛΚΑΚ ΑΕ», που εποπτεύεται"
+    ]
+
+
+def test_a_word_split_across_a_page_break_is_rejoined() -> None:
+    """«διακριτι-» ending page 3 joins «κό» starting page 4.
+
+    49 pages of the corpus end mid-word. A de-hyphenation pass that worked one
+    page at a time would leave every one of those 49 words broken while fixing
+    the 5065 inside pages — and the gap would look like a mysterious parser
+    failure rather than a boundary the design never addressed.
+    """
+    pages = _paged("τον διακριτι-", "κό τίτλο «ΕΛΚΑΚ ΑΕ»")
+
+    assert _texts(dehyphenate(pages)) == ["τον διακριτικό", "τίτλο «ΕΛΚΑΚ ΑΕ»"]
+
+
+def test_the_rejoined_word_stays_on_the_page_it_started_on() -> None:
+    """The completed word belongs to the earlier page, not the later one.
+
+    A citation names where a provision's text begins. The word «διακριτικό»
+    starts on the earlier gazette page, so that is the page a reader is sent to
+    — and the alternative, pushing the fragment forward, would make the earlier
+    page end on a hyphen that points nowhere.
+    """
+    pages = _paged("τον διακριτι-", "κό τίτλο")
+
+    rejoined = dehyphenate(pages)
+
+    assert rejoined[0].number == 1
+    assert "διακριτικό" in rejoined[0].text
+    assert "διακριτικό" not in rejoined[1].text
+
+
+def test_a_hyphen_with_a_space_before_it_is_not_joined() -> None:
+    """«εκτυπωτικών -» keeps its hyphen and its line break.
+
+    1546 line-final hyphens in the corpus have a space before them, and they
+    are genuinely ambiguous: «κε -» + «ντρικής» is a split word, but
+    «εκτυπωτικών -» + «εκδοτικών» is a dash between two complete words, and
+    joining that one yields «εκτυπωτικώνεκδοτικών» — a token in no language,
+    with two real words destroyed. Not joining leaves a word unmatched; joining
+    wrongly corrupts text. The asymmetry decides it.
+    """
+    page = "την κάλυψη των εκτυπωτικών -\nεκδοτικών αναγκών"
+
+    assert _texts(dehyphenate(_paged(page))) == [page]
+
+
+def test_a_hyphen_between_digits_is_not_joined() -> None:
+    """«2018-» + «957» is left alone.
+
+    Three line-final hyphens in the corpus sit next to digits rather than
+    letters. Joining them would silently fuse two numbers into a third that
+    appears nowhere in the law — and a wrong article or year number is the one
+    kind of error a reader cannot catch by reading fluent Greek.
+    """
+    page = "της Οδηγίας (ΕΕ) 2018-\n957 του Συμβουλίου"
+
+    assert _texts(dehyphenate(_paged(page))) == [page]
+
+
+def test_a_word_split_twice_in_a_row_is_fully_rejoined() -> None:
+    """A continuation that is itself hyphenated keeps being joined.
+
+    «ελεγκτών - λο-» / «γιστών» occurs in ν. 5110/2024: the joined fragment can
+    end in a hyphen of its own. Checking the line as it now stands rather than
+    as it arrived makes this fall out for free; a single-pass rule would leave
+    the second half broken.
+    """
+    pages = _paged("ορκωτών ελεγκτών - λο-\nγι-", "στών που είναι")
+
+    assert _texts(dehyphenate(pages)) == ["ορκωτών ελεγκτών - λογιστών", "που είναι"]
+
+
+def test_an_empty_page_survives_dehyphenation() -> None:
+    """A blank page stays blank and does not swallow the next page's text.
+
+    PDF page 59 of ν. 5110/2024 is blank. It sits between two pages of law, so
+    a pass that treated an empty page as a line to be joined would splice the
+    text across it.
+    """
+    pages = _paged("κείμενο", "", "άλλο κείμενο")
+
+    assert _texts(dehyphenate(pages)) == ["κείμενο", "", "άλλο κείμενο"]
+
+
+def test_residual_line_hyphens_counts_what_was_left() -> None:
+    """The hyphens de-hyphenation declined to resolve are counted.
+
+    The ambiguous cases are a known 1546-strong gap, not an absence of them.
+    Reporting zero when the truth is "not attempted" is how the next person
+    comes to believe the text is fully repaired and trusts exact matching on
+    tokens that are still in halves.
+    """
+    assert residual_line_hyphens("εκτυπωτικών -\nεκδοτικών\nκείμενο") == 1
+    assert residual_line_hyphens("Καινοτομίας,\nεκσυγχρονισμός") == 0
+
+
+@pytest.mark.slow
+def test_the_corpus_keeps_every_character_except_hyphens_and_spaces() -> None:
+    """Normalization removes no Greek letter from the corpus.
+
+    The passes delete things — furniture, hyphens, whitespace — and the whole
+    risk of that is deleting one character too many on 320 pages, which no
+    assertion about a sample would notice. Comparing the full letter census
+    before and after bounds the damage: letters may only be *lost* to the
+    header and colophon furniture, never changed in count elsewhere, so a rule
+    that ate a line shows up as a deficit far beyond the furniture's size.
+    """
+    manifest = load_manifest(DEFAULT_MANIFEST_PATH)
+
+    for document in manifest.documents:
+        extracted = extract_document(document)
+        normalized = normalize_document(extracted)
+
+        def letters(pages: list[ExtractedPage]) -> int:
+            return sum(
+                1 for page in pages for character in page.text if character.isalpha()
+            )
+
+        before = letters(
+            [
+                page.model_copy(update={"text": normalize_characters(page.text)})
+                for page in extracted.pages
+            ]
+        )
+        after = letters(normalized.pages)
+
+        assert 0 <= before - after < 0.02 * before, (document.id, before, after)
+
+
+SIGNATURES = (
+    "Αθήνα, 4 Ιουλίου 2025\nΟ Πρόεδρος της Δημοκρατίας\nΚΩΝΣΤΑΝΤΙΝΟΣ ΑΝ. ΤΑΣΟΥΛΑΣ"
+)
+COLOPHON = (
+    "Καποδιστρίου 34, 104 32 Αθήνα\n"
+    "Τηλ. Κέντρο 210 5279000\n"
+    "στην ηλεκτρονική διεύθυνση https://eservices.et.gr\n"
+    "*01001211107250260*"
+)
+
+
+def test_a_colophon_under_law_text_truncates_only_the_colophon() -> None:
+    """π.δ. 62/2025's last page keeps its signature block and loses the advert.
+
+    This is the case that refutes the plan this version started with. The V2
+    note recorded, from ν. 5110/2024 alone, that "every ΦΕΚ ends with that page
+    and it must be dropped" — and PDF page 260 of the π.δ. carries the tail of
+    the correspondence table, the enacting sentence, the date and **the
+    signatures of the President and both ministers**, with only five lines of
+    colophon beneath. Dropping the page would delete the act's signatures.
+    """
+    pages = _paged("Άρθρο 1", f"{SIGNATURES}\n{COLOPHON}")
+
+    assert _texts(strip_colophon(pages)) == ["Άρθρο 1", SIGNATURES]
+
+
+def test_a_page_that_is_nothing_but_colophon_is_emptied_not_removed() -> None:
+    """ν. 5110/2024's page 60 becomes empty text and stays in the document.
+
+    `ExtractedPage.number` is the PDF index, and `gazette_page` is derived from
+    it; dropping the page would make `pages` stop corresponding to the PDF and
+    silently shift nothing while breaking that correspondence for anyone who
+    counts. An empty page is an honest statement: the page exists, and none of
+    it is law.
+    """
+    pages = _paged("Άρθρο 1", f"*01000752405240060*\nΤαχυδρομική Διεύθυνση: {COLOPHON}")
+
+    truncated = strip_colophon(pages)
+
+    assert _texts(truncated) == ["Άρθρο 1", ""]
+    assert [page.number for page in truncated] == [1, 2]
+
+
+def test_the_barcode_alone_is_enough_to_mark_the_colophon() -> None:
+    """The cut is made at whichever marker comes first.
+
+    The two documents order the colophon's parts differently: ν. 5110/2024
+    prints the barcode *above* the address, π.δ. 62/2025 *below* it. Keying on
+    the address alone would leave a barcode line at the top of one document's
+    colophon, and keying on the barcode alone would leave four lines of advert
+    in the other.
+    """
+    pages = _paged("Άρθρο 1\n*01001211107250260*\nΚαποδιστρίου 34, 104 32 Αθήνα")
+
+    assert _texts(strip_colophon(pages)) == ["Άρθρο 1"]
+
+
+def test_a_document_with_no_colophon_is_returned_unchanged() -> None:
+    """Nothing is cut when no marker is present.
+
+    A ΦΕΚ excerpt, a fixture, or a future document whose colophon differs must
+    pass through intact rather than losing its last page to a rule that assumed
+    there is always something to cut.
+    """
+    pages = _paged("Άρθρο 1", "Άρθρο 2\nτέλος")
+
+    assert _texts(strip_colophon(pages)) == ["Άρθρο 1", "Άρθρο 2\nτέλος"]
+
+
+def test_the_address_on_an_earlier_page_is_left_alone() -> None:
+    """Only the last page is searched for the colophon.
+
+    «Καποδιστρίου 34» is a real street address that legislation can name — the
+    Εθνικό Τυπογραφείο's own founding provisions do. Searching every page would
+    let one such mention truncate the document from that point on, destroying
+    every article after it. Unlike the running header, position is part of what
+    a colophon *is*: the block at the end.
+    """
+    pages = _paged("στην οδό Καποδιστρίου 34 των Αθηνών\nΆρθρο 2", "Άρθρο 3")
+
+    assert _texts(strip_colophon(pages)) == [
+        "στην οδό Καποδιστρίου 34 των Αθηνών\nΆρθρο 2",
+        "Άρθρο 3",
+    ]
+
+
+def test_stripping_a_colophon_from_no_pages_is_not_an_error() -> None:
+    """An empty page list returns an empty list.
+
+    `pages[-1]` raises on an empty sequence. The pipeline only ever hands over
+    a real document, but a fixture or a future caller slicing a page range can
+    produce an empty one, and an `IndexError` from a cleanup pass is a confusing
+    way to find that out.
+    """
+    assert strip_colophon([]) == []
+
+
+@pytest.mark.slow
+def test_the_real_signature_block_survives_and_the_colophon_does_not() -> None:
+    """Over both ΦΕΚ: no colophon text remains, and the signatures do.
+
+    Both halves matter and they pull in opposite directions. A rule tuned to
+    remove every trace of the publisher would eat the signature block; a rule
+    careful enough to keep the signatures could leave the advert in and poison
+    V3's embeddings with «Τα ΦΕΚ σε ηλεκτρονική μορφή διατίθενται δωρεάν».
+    """
+    manifest = load_manifest(DEFAULT_MANIFEST_PATH)
+    normalized = {
+        document.id: normalize_document(extract_document(document))
+        for document in manifest.documents
+    }
+
+    for document_id, document in normalized.items():
+        whole = "\n".join(page.text for page in document.pages)
+
+        assert "Καποδιστρίου" not in whole, document_id
+        assert "www.et.gr" not in whole, document_id
+
+    signed = "\n".join(page.text for page in normalized["fek_a_121_2025"].pages)
+    assert "ΚΩΝΣΤΑΝΤΙΝΟΣ ΚΑΡΑΓΚΟΥΝΗΣ" in signed
+    assert "ΝΙΚΗ ΚΕΡΑΜΕΩΣ" in signed

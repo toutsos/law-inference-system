@@ -17,10 +17,10 @@ about characters.
 import re
 import unicodedata
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from itertools import groupby
 
-from greek_law.ingestion.extraction import ExtractedDocument
+from greek_law.ingestion.extraction import ExtractedDocument, ExtractedPage
 
 _GREEK_BLOCKS = ((0x0370, 0x03FF), (0x1F00, 0x1FFF))
 """Greek and Coptic, plus Greek Extended for polytonic forms."""
@@ -190,6 +190,147 @@ def strip_running_header(text: str) -> tuple[int | None, str]:
     return None, text
 
 
+_HORIZONTAL_SPACE = re.compile(r"[^\S\n]+")
+"""Any run of whitespace that is not a line break.
+
+Written as a double negative — "not non-whitespace, and not a newline" —
+because the corpus holds 2540 NO-BREAK SPACEs (U+00A0) alongside ordinary
+ones, and Python's ``\\s`` is Unicode-aware by default, so it already covers
+them. A ``[ \\t]+`` class would have to name every space character Unicode
+defines. Line breaks must survive: de-hyphenation and step 5 both read lines.
+"""
+
+
+def normalize_whitespace(text: str) -> str:
+    """Collapse horizontal whitespace and strip each line's edges."""
+    collapsed = _HORIZONTAL_SPACE.sub(" ", text)
+    return "\n".join(line.strip() for line in collapsed.split("\n"))
+
+
+def _continues_a_word(line: str, continuation: str) -> bool:
+    """Whether ``line``'s trailing hyphen breaks a word ``continuation`` finishes.
+
+    A letter on both sides of the break is the whole test, and it is
+    deliberately narrow. 5065 of the corpus's 5068 line-final hyphens glued to a
+    letter are real word breaks; the three exceptions sit beside digits, where
+    joining would fuse two numbers into a third that appears nowhere in the law.
+
+    The 1546 hyphens with a *space* before them are excluded, and that is the
+    judgement call of this step rather than an oversight: «κε -» + «ντρικής» is
+    a split word, but «εκτυπωτικών -» + «εκδοτικών» is a dash between two whole
+    words, and nothing in the text distinguishes them — the space before the
+    hyphen is as often an extraction artefact as a real one. Resolving them
+    needs evidence this module does not have, so they are left and counted by
+    :func:`residual_line_hyphens`. A missing join leaves one token unmatched; a
+    wrong join destroys two real words and invents a third.
+    """
+    return (
+        len(line) >= 2
+        and line.endswith("-")
+        and line[-2].isalpha()
+        and continuation[:1].isalpha()
+    )
+
+
+def dehyphenate(pages: Sequence[ExtractedPage]) -> list[ExtractedPage]:
+    """Rejoin words the typesetter broke across a line — or across a page.
+
+    49 pages of the corpus end mid-word, so this cannot work one page at a
+    time. It walks the document's lines as a single sequence and regroups them
+    by page afterwards, which makes the page boundary stop being a special
+    case: the join is the same operation whether the continuation is the next
+    line or the first line of the next page.
+
+    Only the token that finishes the word moves, never the whole line. Joining
+    whole lines is the conventional form and across a page boundary it would
+    migrate a line of the next page's text onto this one — a provision printed
+    on gazette page 3189 then cited as 3188.
+
+    The completed word stays on the page it *started* on, because that is the
+    page a citation sends a reader to.
+    """
+    joined: list[tuple[int, str]] = []
+    for page in pages:
+        for line in page.text.split("\n"):
+            if joined and _continues_a_word(joined[-1][1], line):
+                number, previous = joined[-1]
+                head, _, rest = line.partition(" ")
+                joined[-1] = (number, previous[:-1] + head)
+                if rest:
+                    joined.append((page.number, rest))
+                continue
+            joined.append((page.number, line))
+
+    lines_by_page: dict[int, list[str]] = {page.number: [] for page in pages}
+    for number, line in joined:
+        lines_by_page[number].append(line)
+    return [
+        page.model_copy(update={"text": "\n".join(lines_by_page[page.number])})
+        for page in pages
+    ]
+
+
+_COLOPHON_MARKERS = (
+    re.compile(r"Καποδιστρίου\s+34"),
+    re.compile(r"\*\d{10,}\*"),
+)
+"""The two things that only ever appear in the publisher's colophon.
+
+The Εθνικό Τυπογραφείο's street address, and the barcode encoding the issue and
+its page count. Two markers rather than one because the documents order the
+block differently: ν. 5110/2024 prints the barcode above the address,
+π.δ. 62/2025 below it, so either can be the first line of the block.
+"""
+
+
+def strip_colophon(pages: Sequence[ExtractedPage]) -> list[ExtractedPage]:
+    """Truncate the publisher's colophon from the end of the last page.
+
+    **The colophon is a trailing block, not a page.** Step 3 recorded the
+    opposite, generalising from ν. 5110/2024, whose last page is nothing but an
+    Εθνικό Τυπογραφείο advert. π.δ. 62/2025 refutes it: its last page carries
+    the tail of the correspondence table, the enacting sentence, the date and
+    the signatures of the President and both ministers, with five lines of
+    colophon beneath. Dropping that page deletes the act's signatures.
+
+    Only the last page is searched, and here position is part of the definition
+    rather than an assumption about layout — a colophon *is* the block at the
+    end. «Καποδιστρίου 34» is a real address that legislation can name, so
+    searching every page would let one such mention truncate everything after
+    it.
+
+    The page is kept with empty text when all of it was colophon. Dropping it
+    would make ``pages`` stop corresponding to the PDF, which ``number`` and
+    every ``gazette_page`` derived from it depend on.
+    """
+    if not pages:
+        return []
+
+    last = pages[-1]
+    lines = last.text.split("\n")
+    cut = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if any(marker.search(line) for marker in _COLOPHON_MARKERS)
+        ),
+        None,
+    )
+    if cut is None:
+        return list(pages)
+    return [*pages[:-1], last.model_copy(update={"text": "\n".join(lines[:cut])})]
+
+
+def residual_line_hyphens(text: str) -> int:
+    """Count lines that still end in a hyphen after de-hyphenation.
+
+    The ambiguous cases are a known gap, so the pipeline reports its size for
+    the same reason :func:`residual_confusables` exists: silence would read as
+    "the text is whole" rather than "1546 words were not attempted".
+    """
+    return sum(1 for line in text.split("\n") if line.endswith("-"))
+
+
 def normalize_document(document: ExtractedDocument) -> ExtractedDocument:
     """Normalize every page, returning a new document and keeping provenance.
 
@@ -204,6 +345,11 @@ def normalize_document(document: ExtractedDocument) -> ExtractedDocument:
     for page in document.pages:
         gazette_page, text = strip_running_header(normalize_characters(page.text))
         pages.append(
-            page.model_copy(update={"text": text, "gazette_page": gazette_page})
+            page.model_copy(
+                update={
+                    "text": normalize_whitespace(text),
+                    "gazette_page": gazette_page,
+                }
+            )
         )
-    return document.model_copy(update={"pages": pages})
+    return document.model_copy(update={"pages": dehyphenate(strip_colophon(pages))})
