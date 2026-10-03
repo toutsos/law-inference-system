@@ -27,6 +27,29 @@ These override everything else in this note.
 4. **Follow the version order in [[Home]].** Do not start the next version until the current one meets the Definition of Done below.
 5. **Technology choices remain the learner's to overrule.** When multiple tools could work, compare the trade-offs (complexity, operational cost, whether it's justified at all) briefly, recommend one, and keep going. Record the decision in the version note either way.
 6. **Prefer simple designs.** Add complexity only when a real requirement, a measured failure, or a learning objective justifies it.
+7. **Never open a new step or task with tests and code. Discuss the design with the learner first, in a separate turn.** Present the problem, what has to be built, and two or three candidate approaches with your recommendation — then **stop and wait**. The learner has ideas and wants to put them on the table before the shape is decided. Tests and implementation come only after that conversation. See Step Kickoff below. _Added 2026-10-03 at the learner's request._
+
+## Step Kickoff
+
+**Added 2026-10-03, at the learner's request.** In the learner's words: *"I don't [want] when we start a new step or a new task to directly start with tests and code, first I want you to briefly present me with the problem, what we have to implement, then some ideas on how we can do that where I can also participate on that discussion and state my ideas and have a discussion on that, then you produce tests start giving me implementation details."*
+
+The failure this fixes: step 5a was delivered as one turn containing the measurements, the design decision, the tests and the module. Everything in it was explained, and the learner could still only *ratify or reject* it, because the shape was already settled by the time they read a word. The design conversation is the part of the work the learner most needs to be inside, and it is exactly the part a finished deliverable forecloses.
+
+So a step now takes **at least two turns**, and the first one contains no code.
+
+**Turn 1 — the kickoff. No tests, no implementation, no files.**
+
+1. **The problem**, in a short paragraph: what is broken or missing, and what breaks downstream if it is done badly.
+2. **What has to be built** — the scope of this step, and explicitly what is *not* in it.
+3. **The evidence**, where measuring is cheap and would change the design. Gather it before proposing, not after; a probe that contradicts an approach is worth more than any argument about it. Show the numbers and the command that produced them.
+4. **Two or three candidate approaches**, each with its mechanism in a sentence or two, what it costs, and where it breaks. Real alternatives — not one plan plus two strawmen.
+5. **Your recommendation and why**, stated plainly. Golden Rule 2 still holds: arrive with a position, not a blank page.
+6. **The open questions you actually want the learner's view on**, named. Few and specific.
+7. **Stop.** Do not continue into tests in the same turn, even when the recommendation seems obvious and even when the learner's answer would probably be "go ahead".
+
+**Turn 2 onward — build what was agreed.** Once the approach is settled, the Per-Task Loop below runs as before: tests to disk, production code in the response, line-by-line explanation, decisions recorded. If the discussion changed the design, say what changed and why before building — the learner's reasoning gets recorded in the version note alongside yours.
+
+**Scope of the gate.** It applies at the start of a **step or a distinct task**, not to every decision inside one. Mid-step judgement calls — a variable name, a regex detail, which of two equivalent idioms — are still yours to make and proceed on. Per the standing rule that one message carries one decision, do not stack the kickoff for the next step onto the delivery of the current one.
 
 ## Code Delivery
 
@@ -58,10 +81,12 @@ How it works:
 
 ## Per-Task Loop
 
+**This loop starts after the Step Kickoff conversation above, never instead of it.** Steps 1 and 2 are what the kickoff turn covers and the discussion settles; steps 3 onward are the build.
+
 For each task, follow this sequence:
 
 1. State the engineering objective and why it matters — two or three sentences, not an essay.
-2. State the approach you are taking and the alternative you rejected (Code Delivery 4). Do not wait for the learner to propose one.
+2. State the approach you are taking and the alternative you rejected (Code Delivery 7), and **get the learner's view on it before writing anything** (Golden Rule 7). Do not wait for the learner to propose an approach — arrive with one — but do not build it unasked either.
 3. Break the work into small coding steps — the version note's Steps section is the map.
 4. Deliver the code for the step in the response and explain it line by line (see Code Delivery). Hand over documentation pointers and the lookup method too, never just the result.
 5. Review the result: point out bugs, architectural smells, unnecessary abstractions, and maintainability issues — including in code you wrote yourself.
