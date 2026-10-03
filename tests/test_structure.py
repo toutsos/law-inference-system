@@ -25,6 +25,8 @@ from greek_law.ingestion.extraction import (
 from greek_law.ingestion.normalization import normalize_document
 from greek_law.ingestion.structure import (
     find_article_headings,
+    find_instrument_headings,
+    ordinal_value,
     rejected_heading_candidates,
     unreadable_heading_lines,
 )
@@ -303,23 +305,13 @@ def test_a_document_with_no_headings_yields_nothing_rather_than_raising() -> Non
 # ---------------------------------------------------------------------------
 
 
-def test_a_spelled_out_ordinal_heading_is_reported_as_unreadable() -> None:
-    """«Άρθρο πρώτο» is counted, not captured — the known gap of this slice.
-
-    Άρθρο 13 of ν. 5110/2024 ratifies a ΚΑΤΑΣΤΑΤΙΚΟ whose own thirty articles
-    are numbered in words, so «άρθρο 15» and «άρθρο δέκατο πέμπτο» are
-    different provisions of the same ΦΕΚ. This slice reads only digits, and
-    that limit has to be loud: thirty provisions absent from the parse with
-    nothing reporting their absence is exactly the silent corpus loss this
-    version exists to prevent.
-    """
-    statute = "«ΚΑΤΑΣΤΑΤΙΚΟ\nΆρθρο πρώτο\nΝομική μορφή\n"
-    unreadable = unreadable_heading_lines(document(BODY + statute))
-
-    assert find_article_headings(document(BODY + statute)) == find_article_headings(
-        document(BODY)
-    )
-    assert unreadable == {"Άρθρο πρώτο": 1}
+# Removed 2026-10-03 (step 5b-ii): `test_a_spelled_out_ordinal_heading_is_
+# reported_as_unreadable` pinned step 5a's known gap — that «Άρθρο πρώτο» was
+# counted and not captured. The gap is closed, so the assertion inverted. Both
+# of its claims are now made elsewhere: the ordinals staying out of the act's
+# own sequence by `test_the_acts_own_article_sequence_is_unaffected_by_an_
+# instrument`, and the report's new contents by
+# `test_a_mapped_ordinal_is_no_longer_reported_as_unreadable`.
 
 
 def test_a_numbered_contents_entry_is_not_reported_as_unreadable() -> None:
@@ -366,9 +358,245 @@ def test_each_corpus_act_parses_to_one_unbroken_article_sequence() -> None:
         ], entry.id
 
 
+# ---------------------------------------------------------------------------
+# A ratified instrument's own numbering (step 5b-ii)
+# ---------------------------------------------------------------------------
+
+
+STATUTE = (
+    "Άρθρο 1\nΣκοπός\n"
+    "Άρθρο 2\nΚαταστατικό\n"
+    "Κυρώνεται το καταστατικό, το οποίο έχει ως εξής:\n"
+    "«ΚΑΤΑΣΤΑΤΙΚΟ\n"
+    "ΚΕΦΑΛΑΙΟ Α\u2019\n"
+    "Άρθρο πρώτο\nΝομική μορφή\n"
+    "Άρθρο δεύτερο\nΕπωνυμία\n"
+    "Άρθρο 3\nΈδρα\n"
+)
+"""ν. 5110/2024's shape in miniature: άρθρο 2 ratifies a καταστατικό of its own.
+
+The real document does this at άρθρο 13 — «Κυρώνεται το αρχικό καταστατικό του
+Ελληνικού Κέντρου Αμυντικής Καινοτομίας, το οποίο έχει ως εξής:» then
+`«ΚΑΤΑΣΤΑΤΙΚΟ`, a ΚΕΦΑΛΑΙΟ heading, and thirty articles numbered in words. The
+intervening ΚΕΦΑΛΑΙΟ line is kept because it stands between the quotation's
+opening line and the first ordinal, which is exactly the span the label search
+has to cross.
+"""
+
+
+def test_a_compound_ordinal_adds_its_parts() -> None:
+    """«δέκατο έκτο» is 16, and «εικοστό πέμπτο» 25.
+
+    Additive composition is what lets one word table cover 1–99. The rejected
+    alternative read the words positionally — «δέκατο» as a 1 in the tens
+    column — which needs a second table and gets «εικοστό» standing alone
+    wrong, since positionally that is a 2 with an empty units slot rather than
+    20. Getting a composed ordinal wrong does not fail loudly: it produces a
+    real-looking article number for a provision that is somewhere else.
+    """
+    assert ordinal_value("δέκατο έκτο") == 16
+    assert ordinal_value("εικοστό πέμπτο") == 25
+    assert ordinal_value("εικοστό") == 20
+
+
+def test_eleven_and_twelve_are_single_words_not_compounds() -> None:
+    """«ενδέκατο» is 11 and «δωδέκατο» is 12, from the table rather than a sum.
+
+    Greek does not say «δέκατο πρώτο» for 11th, so these two carry a tens
+    component inside one word and have to be literals. Both are in the corpus:
+    ν. 5110/2024's καταστατικό prints them between δέκατο and δέκατο τρίτο. A
+    table holding only 1–10 and the tens would return `None` for both and lose
+    two provisions — visibly, via the unreadable report, but lose them.
+    """
+    assert ordinal_value("ενδέκατο") == 11
+    assert ordinal_value("δωδέκατο") == 12
+
+
+def test_an_ordinal_outside_the_table_returns_none_rather_than_a_number() -> None:
+    """A word the table does not hold yields `None`, never a partial sum.
+
+    The table stops at ενενηκοστό (90), so «εκατοστό» is unmapped by design —
+    hundreds are left out until a document needs them. `None` is what makes
+    that safe: the heading becomes unreadable and is *reported*, instead of
+    being numbered from the half of it that happens to map.
+    """
+    assert ordinal_value("εκατοστό") is None
+    assert ordinal_value("εκατοστό πρώτο") is None
+
+
+def test_every_word_must_map_or_the_whole_heading_is_refused() -> None:
+    """«τρίτο Έδρα» is not an ordinal, even though «τρίτο» is.
+
+    The nine false positives the word table exists to kill. ν. 5110/2024's
+    contents prints `Άρθρο τρίτο Έδρα`, `Άρθρο έκτο Διάρκεια`, `Άρθρο ένατο
+    Έσοδα` — a heading's exact shape, because the title happens to be one word.
+    Summing only the words that map would make `Άρθρο τρίτο Έδρα` the third
+    article of an instrument and duplicate a provision under two addresses.
+    """
+    assert ordinal_value("τρίτο") == 3
+    assert ordinal_value("τρίτο Έδρα") is None
+    assert ordinal_value("έκτο Διάρκεια") is None
+
+
+def test_the_word_table_is_case_sensitive() -> None:
+    """A capitalised «Έκτο» does not map, because titles are capitalised.
+
+    The second line of defence behind the closed vocabulary. Headings print the
+    ordinal in lower case and titles start with a capital, so case-sensitivity
+    refuses a title word that happens to be an ordinal — `Άρθρο δέκατο Έκτο`
+    would otherwise read as 16 rather than as article 10 titled «Έκτο». Folding
+    case for convenience would remove that for nothing.
+    """
+    assert ordinal_value("έκτο") == 6
+    assert ordinal_value("Έκτο") is None
+
+
+def test_a_ratified_instruments_articles_are_found_and_grouped() -> None:
+    """The ordinals come back as one instrument, in document order.
+
+    The step's headline behaviour. Grouped rather than flagged per heading: the
+    instrument is one fact about thirty articles, and repeating it thirty times
+    would allow thirty copies to disagree.
+    """
+    (instrument,) = find_instrument_headings(document(STATUTE))
+
+    assert [heading.number for heading in instrument.headings] == [
+        "πρώτο",
+        "δεύτερο",
+    ]
+
+
+def test_the_instrument_is_attributed_to_the_article_that_ratified_it() -> None:
+    """The ordinals under άρθρο 2 are recorded as ratified by άρθρο 2.
+
+    Attribution is positional and has to be: a spelled-out ordinal does **not**
+    imply a ratified instrument, because Greek ratification laws number their
+    own articles πρώτο, δεύτερο, τρίτο — π.δ. 62/2025 cites «ΚΝΥ ΑΕ που
+    κυρώθηκε με το άρθρο πρώτο του ν. 3850/2010», a top-level article. So
+    notation cannot carry the distinction and position must.
+
+    This number is also what the citation prints. Without it, «άρθρο δέκατο
+    πέμπτο» has no resolvable address — see the step 5b-i domain tests.
+    """
+    (instrument,) = find_instrument_headings(document(STATUTE))
+
+    assert instrument.ratifying_article == "2"
+
+
+def test_the_label_is_the_line_that_opens_the_quotation() -> None:
+    """«ΚΑΤΑΣΤΑΤΙΚΟ becomes the label ΚΑΤΑΣΤΑΤΙΚΟ, guillemet removed.
+
+    The gazette marks an enacted instrument by quoting it, so the line naming
+    it is the one carrying the opening guillemet — and the search is bounded to
+    the span between the ratifying article and the instrument's first article,
+    which over ν. 5110/2024 contains exactly one such line. An unbounded search
+    would find the first of the 202 guillemets in that document.
+
+    Recorded **as printed**, in the nominative. Turning it into the genitive a
+    citation needs («του καταστατικού») is Greek morphology, which by the step
+    5b-ii decision this module does not attempt — the corpus cites instruments
+    of three genders and a hard-coded «του» would emit «του Σύμβασης».
+    """
+    (instrument,) = find_instrument_headings(document(STATUTE))
+
+    assert instrument.label == "ΚΑΤΑΣΤΑΤΙΚΟ"
+
+
+def test_the_acts_own_article_sequence_is_unaffected_by_an_instrument() -> None:
+    """άρθρα 1–3 still come back contiguous with the ordinals interleaved.
+
+    Why these are two functions rather than one list. In the real document the
+    thirty ordinals sit between άρθρο 13 and άρθρο 14, so a single ordered list
+    would read 1–13, πρώτο–τριακοστό, 14–82 and the contiguity invariant — step
+    5a's strongest check — could no longer be stated. Keeping the namespaces
+    apart keeps both provable.
+    """
+    assert [heading.number for heading in find_article_headings(document(STATUTE))] == [
+        "1",
+        "2",
+        "3",
+    ]
+
+
+def test_an_ordinal_before_the_acts_first_article_is_skipped() -> None:
+    """With no preceding article, there is nothing that could have ratified it.
+
+    Skipping is the conservative half of the choice; the other half would
+    invent a ratifying article and emit a citation pointing at an article that
+    does not exist — the exact bug step 5b removes. Not reachable in this
+    corpus, since the contents' ordinal entries are all refused by the word
+    table, so this pins the behaviour rather than a known case.
+    """
+    assert find_instrument_headings(document("Άρθρο πρώτο\nΝομική μορφή\n")) == []
+
+
+def test_a_document_with_no_instrument_yields_no_instruments() -> None:
+    """π.δ. 62/2025's case: 588 articles and nothing ratified.
+
+    The common case, and the one a grouping function can get wrong by returning
+    a single empty instrument instead of no instruments at all — which would
+    give step 7 a `ratifying_article` to attach to provisions that have none.
+    """
+    assert find_instrument_headings(document(BODY)) == []
+
+
+def test_a_mapped_ordinal_is_no_longer_reported_as_unreadable() -> None:
+    """«Άρθρο πρώτο» is read now, so it leaves the unreadable report.
+
+    Step 5a reported all 60 of ν. 5110/2024's ordinal heading lines as
+    unreadable, correctly at the time. Leaving them there once they parse would
+    make the report claim the pipeline cannot read lines it reads — and a report
+    that overstates what is missing gets ignored as fast as one that understates
+    it. The corpus count drops 64 → 4, and the four that remain are «Άρθρο
+    μόνο», the sole-article form, which is still unread.
+    """
+    assert unreadable_heading_lines(document(STATUTE)) == {}
+    assert unreadable_heading_lines(document("Άρθρο μόνο ν. 690/1945\n")) == {
+        "Άρθρο μόνο ν. 690/1945": 1
+    }
+
+
+def test_a_digit_heading_that_runs_on_into_prose_is_not_reported() -> None:
+    """`Άρθρο 3, όπως διαμορφώθηκε` is a digit form, comma and all.
+
+    A regression caught by measurement while writing this step. The digit
+    exclusion tests the **first character**, not the whole first token; a version
+    requiring a clean number took the corpus's unreadable count from 4 to 167,
+    pulling in every correspondence-table row whose number is followed by a
+    comma or a lower-case letter — `Άρθρο 3, όπως διαμορφώθηκε και`, `Άρθρο 5α
+    π.δ. 1/1990`. 163 lines of noise would have buried the four that matter.
+    """
+    noisy = "Άρθρο 3, όπως διαμορφώθηκε και\nΆρθρο 5α π.δ. 1/1990\n"
+
+    assert unreadable_heading_lines(document(noisy)) == {}
+
+
+@pytest.mark.slow
+def test_the_katastatiko_parses_to_thirty_contiguous_articles() -> None:
+    """ν. 5110/2024 yields one instrument, ratified by άρθρο 13, άρθρα 1–30.
+
+    The same proof the act's own sequence gets, applied to the second
+    namespace: «πρώτο» … «τριακοστό» mapping to exactly 1..30 with no gap and
+    no repeat, independently checkable against the contents page, which lists
+    thirty. It also pins that π.δ. 62/2025 has no instrument — a rule that
+    found one there would be reading its correspondence table as enacted text.
+    """
+    found = {}
+    for entry in load_manifest(DEFAULT_MANIFEST_PATH).documents:
+        normalized = normalize_document(extract_document(entry))
+        found[entry.id] = find_instrument_headings(normalized)
+
+    assert found["fek_a_121_2025"] == []
+
+    (instrument,) = found["fek_a_75_2024"]
+    assert instrument.label == "ΚΑΤΑΣΤΑΤΙΚΟ"
+    assert instrument.ratifying_article == "13"
+    assert [ordinal_value(h.number) for h in instrument.headings] == list(range(1, 31))
+
+
 @pytest.mark.slow
 def test_what_the_corpus_leaves_behind_is_the_size_it_was_measured_at() -> None:
-    """9 rejected candidates and 64 unreadable heading lines, as measured.
+    """9 rejected candidates and 4 unreadable heading lines, as measured.
 
     A regression fence around the two reports rather than around the parse. The
     numbers themselves carry no meaning; what they pin is that a future change
@@ -378,10 +606,11 @@ def test_what_the_corpus_leaves_behind_is_the_size_it_was_measured_at() -> None:
     list from 9 to 91, and nothing else in the suite would notice.
 
     The 9 are three wrapped contents entries and six correspondence rows whose
-    second cell rule 2 does not recognise. The 64 unreadable lines are the
-    thirty ΚΑΤΑΣΤΑΤΙΚΟ articles of ν. 5110/2024 counted twice — contents and
-    body — plus four «Άρθρο μόνο» rows in π.δ. 62/2025's correspondence table,
-    the sole-article form and a third numbering scheme this slice cannot read.
+    second cell rule 2 does not recognise. The 4 unreadable lines are all
+    «Άρθρο μόνο» rows in π.δ. 62/2025's correspondence table — the sole-article
+    form, a numbering scheme neither 5a nor 5b-ii reads. It was 64 before
+    5b-ii; the 60 that left were ν. 5110/2024's ΚΑΤΑΣΤΑΤΙΚΟ headings, counted
+    once in the contents and once in the body, which now parse.
     """
     rejected = 0
     unreadable = 0
@@ -390,4 +619,4 @@ def test_what_the_corpus_leaves_behind_is_the_size_it_was_measured_at() -> None:
         rejected += len(rejected_heading_candidates(normalized))
         unreadable += sum(unreadable_heading_lines(normalized).values())
 
-    assert (rejected, unreadable) == (9, 64)
+    assert (rejected, unreadable) == (9, 4)
