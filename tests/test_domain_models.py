@@ -7,6 +7,7 @@ from greek_law.domain import (
     Article,
     Case,
     Paragraph,
+    RatifiedInstrument,
     SourceReference,
     StructuralUnit,
 )
@@ -173,15 +174,147 @@ def test_a_multi_word_article_number_produces_a_key_with_no_whitespace():
     another, so the provision is indexed under one id and looked up under
     another. Retrieval then returns nothing for exactly the articles a citation
     question is most likely to ask about.
+
+    Written before `instrument` existed, with no instrument set — which built a
+    reference V2 step 5b established is *wrong*, since ν. 5110/2024 has no
+    «άρθρο δέκατο πέμπτο» of its own. The instrument is supplied now so the
+    fixture is a provision that exists; the whitespace assertion is what the
+    test is for and is unchanged.
     """
     reference = SourceReference(
         act=ActIdentity(act_type="ν.", number="5110", year=2024),
+        instrument=KATASTATIKO,
         article="δέκατο πέμπτο",
         paragraph="1",
     )
 
-    assert reference.key == "ν.5110/2024/άρθρο-δέκατο-πέμπτο/παρ-1"
+    assert reference.key == "ν.5110/2024/άρθρο-13/άρθρο-δέκατο-πέμπτο/παρ-1"
     assert " " not in reference.key
+
+
+KATASTATIKO = RatifiedInstrument(cited_as="του καταστατικού", ratifying_article="13")
+"""The καταστατικό of the ΕΛΚΑΚ, ratified by άρθρο 13 of ν. 5110/2024.
+
+Real: PDF page 10 of ΦΕΚ Α' 75/2024 reads «Κυρώνεται το αρχικό καταστατικό του
+Ελληνικού Κέντρου Αμυντικής Καινοτομίας, το οποίο έχει ως εξής:» followed by
+thirty articles numbered «πρώτο» to «τριακοστό».
+"""
+
+ELKAK = ActIdentity(act_type="ν.", number="5110", year=2024)
+
+
+def test_a_ratified_instruments_article_is_not_cited_as_the_acts_own():
+    """«άρθρο δέκατο πέμπτο» cites the καταστατικό, naming the article that enacted it.
+
+    The bug this field exists to remove. ν. 5110/2024 has articles 1–82 in
+    digits and no «άρθρο δέκατο πέμπτο» at all, so the old rendering —
+    «ν. 5110/2024, άρθρο δέκατο πέμπτο» — pointed at an address that does not
+    exist. Either the reader fails to find it and the answer is unverifiable,
+    or they read it as «άρθρο 15» and land on *Εκπαίδευση - Κέντρα Αριστείας*,
+    a provision about centres of excellence, instead of the composition of a
+    board of directors. Well-formed and wrong, which is this version's
+    recurring failure shape.
+    """
+    reference = SourceReference(
+        act=ELKAK, instrument=KATASTATIKO, article="δέκατο πέμπτο"
+    )
+
+    assert reference.citation == (
+        "άρθρο δέκατο πέμπτο του καταστατικού που κυρώθηκε με το άρθρο 13 ν. 5110/2024"
+    )
+
+
+def test_the_ratification_clause_is_rendered_after_the_paragraph():
+    """παρ. 1 attaches to the instrument's article, not to the ratifying one.
+
+    The reason a nested citation is rendered act-last. The ratification clause
+    ends in an article number — «…με το άρθρο 13» — so anything appended after
+    it reads as belonging to *that* article. Act-first would produce «ν.
+    5110/2024, άρθρο δέκατο πέμπτο του καταστατικού που κυρώθηκε με το άρθρο 13
+    παρ. 1», citing a paragraph of the law's άρθρο 13 — which has no paragraphs
+    — rather than of the καταστατικό's άρθρο δέκατο πέμπτο, which has six.
+    """
+    reference = SourceReference(
+        act=ELKAK, instrument=KATASTATIKO, article="δέκατο πέμπτο", paragraph="1"
+    )
+
+    assert reference.citation == (
+        "άρθρο δέκατο πέμπτο παρ. 1 του καταστατικού "
+        "που κυρώθηκε με το άρθρο 13 ν. 5110/2024"
+    )
+
+
+def test_the_key_nests_the_instrument_under_its_ratifying_article():
+    """The key path records the nesting; the instrument's name stays out of it.
+
+    Two provisions of one ΦΕΚ must get different store ids, and the path has to
+    say which namespace each belongs to or V5 cannot filter the instrument's
+    articles from the act's own. The ratifying article carries that, and is
+    preferred over `cited_as` because an article number is unique within an act
+    and stable, while `cited_as` is prose in a grammatical case — slugging «του
+    καταστατικού» into an id would put the Greek genitive article in every key.
+    """
+    own = SourceReference(act=ELKAK, article="15")
+    nested = SourceReference(act=ELKAK, instrument=KATASTATIKO, article="δέκατο πέμπτο")
+
+    assert own.key == "ν.5110/2024/άρθρο-15"
+    assert nested.key == "ν.5110/2024/άρθρο-13/άρθρο-δέκατο-πέμπτο"
+
+
+def test_an_instrument_cannot_be_named_without_the_article_that_ratified_it():
+    """Half an address is unconstructible rather than merely invalid.
+
+    The whole argument for a nested type over two optional fields on
+    `SourceReference`. With flat fields, `instrument="του καταστατικού"` and no
+    ratifying article is a well-typed object that renders a citation missing
+    the only clause that makes it resolvable — and nothing would raise. Here
+    the two facts live in one object, so the omission is a construction error.
+    """
+    with pytest.raises(ValidationError):
+        RatifiedInstrument(cited_as="του καταστατικού")  # type: ignore[call-arg]
+
+
+def test_cited_as_carries_its_own_grammatical_case():
+    """«της Σύμβασης» keeps its feminine article; the renderer adds no «του».
+
+    π.δ. 62/2025 cites three ratified instruments of different genders — «του
+    ΚΝΥ ΑΕ» (masculine), «του καταστατικού» (neuter), «της Σύμβασης της
+    Ουάσιγκτον» (feminine) — and Greek case and gender cannot be derived from a
+    bare noun. A renderer hard-coding «του» would emit «του Σύμβασης», which is
+    not Greek. So the stored form includes the article, and this test is what
+    stops a later refactor from "tidying" it into the template.
+    """
+    convention = RatifiedInstrument(
+        cited_as="της Σύμβασης της Ουάσιγκτον", ratifying_article="πρώτο"
+    )
+    reference = SourceReference(
+        act=ActIdentity(act_type="ν.", number="2269", year=1920),
+        instrument=convention,
+        article="3",
+    )
+
+    assert reference.citation == (
+        "άρθρο 3 της Σύμβασης της Ουάσιγκτον "
+        "που κυρώθηκε με το άρθρο πρώτο ν. 2269/1920"
+    )
+
+
+def test_an_act_without_an_instrument_cites_exactly_as_before():
+    """The act-first form is untouched when `instrument` is None.
+
+    `instrument` is optional and almost every reference will leave it unset, so
+    the regression that matters most is the one where nothing changed. A
+    renderer refactored around the nested branch could easily move the comma or
+    the act to the end for every citation in the system.
+    """
+    reference = SourceReference(
+        act=ActIdentity(act_type="Ν.", number="4808", year=2021),
+        article="4",
+        paragraph="2",
+        cases=["α"],
+    )
+
+    assert reference.citation == "Ν. 4808/2021, άρθρο 4 παρ. 2 περ. α΄"
 
 
 def test_key_is_derived_and_cannot_be_set(act_identity):
