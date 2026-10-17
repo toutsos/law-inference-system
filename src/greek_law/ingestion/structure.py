@@ -44,10 +44,14 @@ the document's final span only — at the enactment formula or an annex marker.
 :func:`line_coverage` is the check on all of it: every line of the document
 lands in exactly one of four buckets, and the four must sum to the total.
 
+Step 5d splits an article's text into its numbered paragraphs
+(:func:`split_paragraphs`), again by three rules — the marker's shape, whether
+it sits inside a quotation of another act, and the article's own run.
+
 The container path (ΒΙΒΛΙΟ, ΜΕΡΟΣ, ΤΜΗΜΑ, ΚΕΦΑΛΑΙΟ) is step 5e, which is where
-the lines trimmed above are claimed; numbered paragraphs are step 5d. A third
-numbering form, «Άρθρο μόνο», is still unread and is what
-:func:`unreadable_heading_lines` now reports.
+the lines trimmed above are claimed; the lettered περιπτώσεις inside a
+paragraph are later still. A third numbering form, «Άρθρο μόνο», is still
+unread and is what :func:`unreadable_heading_lines` now reports.
 """
 
 import re
@@ -882,4 +886,174 @@ def line_coverage(document: ExtractedDocument) -> LineCoverage:
         front_matter=spans[0].start,
         between_articles=sum(span.stop - span.text_stop for span in spans[:-1]),
         trailing=spans[-1].stop - spans[-1].text_stop,
+    )
+
+
+_PARAGRAPH_MARKER = re.compile(r"^(\d+)\.(?:\s+|(?=[α-ω]{1,2}\)))")
+"""A line opening a numbered paragraph — and only that.
+
+**Stricter than :data:`_PARAGRAPH_START`, and deliberately a second pattern.**
+The two answer different questions. The title rule asks "is this line *not* a
+title", where anything number-shaped is answer enough and a loose pattern is
+the safe side. This asks "does a paragraph of this article start here", where a
+false positive splits a provision in two and files half of it under a number
+the gazette never printed.
+
+What may follow the full stop is therefore spelled out: **whitespace**, which
+is consumed, or a **lettered case opening the paragraph** — ``1.α) Κάθε
+εργοδότης``, which the gazette prints without a space and which occurs twice in
+the corpus. The lookahead leaves the ``α)`` in the paragraph's text, where it
+belongs while περιπτώσεις are unparsed.
+
+Everything else is refused here, locally, rather than left to the sequence rule
+downstream — 59 line-initial ``N.`` candidates in the corpus, not one of them a
+paragraph:
+
+- **dates and times** in a wrapped line — ``8.4.2023, ήτοι από την έναρξη
+  ισχύος``, ``21.4.1967 έως 24.7.1974,``. The decisive one is π.δ. 62/2025's
+  άρθρο 170, where ``05.00, ανεξαρτήτως ώρας έναρξης`` reads as ``5`` and
+  arrived exactly where παρ. 5 was expected, so the sequence rule accepted the
+  time and refused the real paragraph. A decoy filter that only works when the
+  decoy's number is wrong is luck, not a rule.
+- **a number alone on its line**, which is how a cross-reference whose article
+  number wrapped appears — «… σύμφωνα με την περ. γ) του άρθρου» / ``105.`` —
+  and how the extraction serialises a table's Α/Α column.
+"""
+
+
+class ParagraphText(BaseModel):
+    """One παράγραφος — the unit a citation names and a chunk should be.
+
+    ``number`` is ``None`` for text that carries no paragraph number: an
+    article's unnumbered lead-in, or the whole of an article that has no
+    numbered paragraphs at all. That is the case
+    :class:`~greek_law.domain.Paragraph` documents as citing with no παρ.
+    component, which is the correct citation for it — not a defect.
+
+    **The marker is removed from the text and kept in ``number``.** The same
+    move :func:`_article_text` makes with the title: the number is captured
+    structurally so step 7 can render «παρ. 2» from a field rather than parse
+    it back out of prose, and so two representations cannot disagree. The text
+    keeps its line breaks, for the reason :class:`ArticleText` does.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    number: str | None
+    text: str
+
+
+class ArticleParagraphs(BaseModel):
+    """One article's paragraphs, with the markers the rules would not accept.
+
+    Two reports, not one, because they answer different questions — the same
+    reason :func:`rejected_heading_candidates` and
+    :func:`unreadable_heading_lines` stayed separate.
+
+    ``refused_markers`` are lines that pass the shape rule, sit outside any
+    quotation, and still do not continue this article's run. **25 across the
+    corpus, and all three kinds are worth knowing:**
+
+    - **13 table rows** in π.δ. 62/2025's άρθρα 500 and 503, which are
+      classification tables — ``5. Βιομηχανία ειδών διατροφής 20``. Refused,
+      each article stays one unnumbered paragraph holding its table, which is
+      what it is.
+    - **10 wrapped cross-references**, where an article number ended a sentence
+      and the next sentence continued on the same line: ``83. Χρέη εισηγητή και
+      γραμματέα ασκούν υπάλληλοι`` is the tail of άρθρο 91's παρ. 1, not a παρ.
+      83.
+    - **2 real paragraphs**, and they are the honest cost of requiring the run
+      to start at 1. ν. 5110/2024's καταστατικό, άρθρο τέταρτο, prints an
+      unnumbered lead paragraph and then «2.» and «3.», so both are refused and
+      the whole article is one unnumbered paragraph. The text is intact and the
+      refusal is reported; the alternative — accepting whatever number the first
+      marker carries — was measured and parses άρθρο 503's table as παραγράφους
+      4 to 8, inventing five provisions instead of under-reading one article.
+
+    ``quoted_markers`` are markers suppressed because they sit inside a
+    quotation — **another act's paragraphs, not this one's**. 172 of them in 30
+    articles of ν. 5110/2024, which amends dozens of acts by reprinting their
+    provisions, against **0** in π.δ. 62/2025, which codifies and amends
+    nothing. Reported rather than dropped because the count is the evidence
+    that the quotation rule is doing work: without it, ν. 5110/2024's άρθρο 61
+    takes the eight paragraphs of ν.δ. 398/1974's άρθρο 17 as its own and
+    refuses its own παρ. 2.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    paragraphs: list[ParagraphText]
+    refused_markers: list[str]
+    quoted_markers: list[str]
+
+
+def split_paragraphs(article: ArticleText) -> ArticleParagraphs:
+    """Split one article's text into paragraphs — three rules, as step 5a has.
+
+    Takes the article rather than its text because **the numbering is a fact
+    about the article**: every article restarts at 1, so the run that validates
+    a marker exists only within these boundaries. A function over a bare string
+    would make that scope a convention instead of a signature.
+
+    The three rules, each refusing a decoy the others cannot:
+
+    1. **Shape** — :data:`_PARAGRAPH_MARKER`, which refuses dates, times and
+       bare table row numbers before they can be counted.
+    2. **Not inside a quotation** — the gazette prints an amended act's text in
+       guillemets, so a marker at depth ≥ 1 belongs to *that* act. This is the
+       quote-depth tracking step 5a measured and rejected **document-wide**,
+       where ν. 5110/2024's 202 openers against 201 closers let one typesetter's
+       slip reclassify the rest of the file. Scoped to one article it is sound:
+       the depth starts at 0 for every article and the damage from an unmatched
+       guillemet stops at that article's last line.
+    3. **The article's own run** — a marker is accepted only if it is the next
+       number expected, starting at 1. A refused marker does not advance the
+       expectation, so one decoy cannot invalidate the paragraphs after it.
+
+    **Rule 2's per-article reset is load-bearing, not a simplification.** A
+    ratification quotation spans whole articles: ν. 5110/2024's άρθρο 13 opens
+    «ΚΑΤΑΣΤΑΤΙΚΟ and the closing guillemet lands 1 183 lines later, inside the
+    instrument's άρθρο τριακοστό. Carrying depth across articles would put all
+    thirty of the καταστατικό's articles permanently inside a quotation and
+    leave every one of them with no paragraphs at all.
+
+    Measured over the corpus: 1 859 markers accepted, 25 refused, 172
+    suppressed as another act's, and **2 136 paragraphs** out of 701 articles —
+    1 859 numbered and 277 unnumbered.
+
+    ``Paragraph.cases`` — the lettered περιπτώσεις — stays empty by the step 5d
+    decision: 1 689 case markers exist, nothing before
+    [[V6 - Legal Structure and Citations]] cites at that level, and the text of
+    each case is inside its paragraph, so nothing is lost.
+    """
+    lines = article.text.split("\n") if article.text else []
+    starts: list[tuple[int, str, int]] = []
+    refused: list[str] = []
+    quoted: list[str] = []
+    depth = 0
+    expected = 1
+
+    for index, line in enumerate(lines):
+        match = _PARAGRAPH_MARKER.match(line)
+        if match is not None:
+            if depth > 0:
+                quoted.append(line)
+            elif int(match.group(1)) == expected:
+                starts.append((index, match.group(1), match.end()))
+                expected += 1
+            else:
+                refused.append(line)
+        depth = max(0, depth + line.count("«") - line.count("»"))
+
+    paragraphs: list[ParagraphText] = []
+    lead = "\n".join(lines[: starts[0][0]] if starts else lines).strip()
+    if lead:
+        paragraphs.append(ParagraphText(number=None, text=lead))
+    for position, (index, number, offset) in enumerate(starts):
+        stop = starts[position + 1][0] if position + 1 < len(starts) else len(lines)
+        text = "\n".join([lines[index][offset:], *lines[index + 1 : stop]]).strip()
+        paragraphs.append(ParagraphText(number=number, text=text))
+
+    return ArticleParagraphs(
+        paragraphs=paragraphs, refused_markers=refused, quoted_markers=quoted
     )

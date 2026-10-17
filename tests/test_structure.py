@@ -25,6 +25,7 @@ from greek_law.ingestion.extraction import (
 from greek_law.ingestion.normalization import normalize_document
 from greek_law.ingestion.structure import (
     ArticleHeading,
+    ArticleText,
     find_article_headings,
     find_article_texts,
     find_instrument_headings,
@@ -33,6 +34,7 @@ from greek_law.ingestion.structure import (
     numbering_breaks,
     ordinal_value,
     rejected_heading_candidates,
+    split_paragraphs,
     unreadable_heading_lines,
 )
 
@@ -1047,3 +1049,333 @@ def test_numbering_breaks_accepts_an_insertion_and_reports_a_gap() -> None:
         for number in ("1", "2", "4")
     ]
     assert numbering_breaks(gapped) == ["4"]
+
+
+# ---------------------------------------------------------------------------
+# Step 5d — numbered paragraphs inside one article
+# ---------------------------------------------------------------------------
+
+
+def article(text: str, number: str = "1") -> ArticleText:
+    """An ArticleText carrying `text`, for the paragraph splitter to cut.
+
+    `split_paragraphs` takes the article rather than a bare string because the
+    numbering restarts per article, so these tests construct the smallest thing
+    that carries that boundary. The title is set to something non-empty so a
+    test can never pass because the title was accidentally None.
+    """
+    return ArticleText(
+        heading=ArticleHeading(number=number, page=1, gazette_page=3001, line=0),
+        title="Τίτλος",
+        text=text,
+    )
+
+
+def test_numbered_paragraphs_split_at_their_markers_and_drop_the_number() -> None:
+    """«1. …» and «2. …» become two paragraphs whose text omits the marker.
+
+    The unit a citation names. Without the split, «άρθρο 141 παρ. 2» can only
+    be answered with the whole article — up to 263 lines — and step 6 has no
+    boundary to chunk on but line count, which is the fixed-size cutting the
+    chunking step exists to avoid.
+
+    The marker is dropped from the text because the number is kept in the
+    field: two copies of one fact are two things that can disagree, and step 7
+    renders «παρ. 2» from the field.
+    """
+    split = split_paragraphs(
+        article("1. Πρώτη παράγραφος.\nσυνέχεια.\n2. Δεύτερη παράγραφος.")
+    )
+
+    assert [(p.number, p.text) for p in split.paragraphs] == [
+        ("1", "Πρώτη παράγραφος.\nσυνέχεια."),
+        ("2", "Δεύτερη παράγραφος."),
+    ]
+
+
+def test_text_before_the_first_marker_is_an_unnumbered_paragraph() -> None:
+    """An article's lead-in is kept, with number None.
+
+    23 articles in the corpus open with unnumbered text before «1.» — π.δ.
+    62/2025's άρθρο 141Α begins «Ειδικά για τη διεξαγωγή … ισχύουν τα εξής:».
+    Dropping it would lose the sentence that governs how every numbered
+    paragraph below it is read, and attaching it to παρ. 1 would cite it as
+    παρ. 1, which is a different provision.
+    """
+    split = split_paragraphs(article("Ισχύουν τα εξής:\n1. Πρώτη.\n2. Δεύτερη."))
+
+    assert [(p.number, p.text) for p in split.paragraphs] == [
+        (None, "Ισχύουν τα εξής:"),
+        ("1", "Πρώτη."),
+        ("2", "Δεύτερη."),
+    ]
+
+
+def test_an_article_with_no_markers_is_one_unnumbered_paragraph() -> None:
+    """253 corpus articles print no paragraph number at all.
+
+    The V0 domain model already documents `number is None` as citing with no
+    παρ. component — «ν. 5110/2024, άρθρο 1» is the complete and correct
+    citation for such an article. Returning zero paragraphs instead would make
+    the article's text unreachable through the paragraph layer everything
+    downstream reads.
+    """
+    split = split_paragraphs(article("Σκοπός του παρόντος είναι:\nα) η ανάπτυξη."))
+
+    assert [(p.number, p.text) for p in split.paragraphs] == [
+        (None, "Σκοπός του παρόντος είναι:\nα) η ανάπτυξη.")
+    ]
+
+
+def test_a_date_opening_a_wrapped_line_is_not_a_paragraph_marker() -> None:
+    """«8.4.2023, ήτοι από την έναρξη ισχύος» is a date, not παρ. 8.
+
+    36 such lines in the corpus. The shape rule refuses them on the required
+    whitespace after the full stop, before any counting happens — a paragraph
+    marker is always followed by a space, a date never is.
+    """
+    split = split_paragraphs(
+        article("1. Η ισχύς αρχίζει από την\n8.4.2023, ήτοι από την έναρξη ισχύος.")
+    )
+
+    assert [p.number for p in split.paragraphs] == ["1"]
+    assert split.refused_markers == []
+
+
+def test_a_time_that_reads_as_the_expected_number_is_still_not_a_marker() -> None:
+    """π.δ. 62/2025 άρθρο 170: «05.00» arrived exactly where παρ. 5 was due.
+
+    The case that decided the shape rule. `int("05")` is 5, so the sequence
+    rule accepted the time as παρ. 5 and then refused the article's real παρ. 5
+    — one provision renumbered and one lost, with a contiguous run to show for
+    it. A decoy filter that only works when the decoy's number is wrong is
+    luck; requiring the space is the rule.
+    """
+    split = split_paragraphs(
+        article(
+            "1. Πρώτη.\n2. Δεύτερη.\n3. Τρίτη.\n4. Τέταρτη.\n"
+            "05.00, ανεξαρτήτως ώρας έναρξης και λήξης βάρδιας\n"
+            "5. Πέμπτη."
+        )
+    )
+
+    assert [p.number for p in split.paragraphs] == ["1", "2", "3", "4", "5"]
+    assert split.paragraphs[-1].text.startswith("Πέμπτη")
+
+
+def test_a_bare_table_row_number_is_not_a_paragraph_marker() -> None:
+    """π.δ. 62/2025 άρθρο 503 is a table, and «2.» is its Α/Α column.
+
+    Its 418 lines are a classification table whose row numbers the extraction
+    serialises alone on a line, between the rows' prose. Read as paragraphs
+    they would cut the table into pieces numbered as provisions; refused, the
+    article is one unnumbered paragraph holding the table, which is what it is.
+    """
+    split = split_paragraphs(
+        article("Πίνακας ειδικοτήτων\nΤμήματος Ηλεκτρολογίας\n2.\nΚτηνοτροφία")
+    )
+
+    assert [p.number for p in split.paragraphs] == [None]
+    assert split.refused_markers == []
+
+
+def test_a_wrapped_article_reference_is_not_a_marker_and_stays_in_its_sentence() -> (
+    None
+):
+    """«… του άρθρου» / «105.» is a cross-reference whose number wrapped.
+
+    π.δ. 62/2025's άρθρο 95: the sentence of παρ. 1 ends on a line reading just
+    `105.`, which has a marker's exact shape. Two things have to hold at once —
+    it must not open a paragraph, and it must stay inside παρ. 1, because it is
+    the end of that provision's sentence. Nothing follows the full stop, so the
+    shape rule refuses it before the sequence rule is consulted, which is why
+    it is not in `refused_markers`: the line was never a candidate, and nothing
+    was dropped.
+    """
+    split = split_paragraphs(
+        article(
+            "1. Εφαρμόζεται σύμφωνα με την περ. γ) του άρθρου\n105.\n2. Δεν εφαρμόζεται:"
+        )
+    )
+
+    assert [p.number for p in split.paragraphs] == ["1", "2"]
+    assert split.refused_markers == []
+    assert split.paragraphs[0].text.endswith("105.")
+
+
+def test_a_wrapped_reference_with_prose_after_it_is_refused_and_reported() -> None:
+    """«83. Χρέη εισηγητή και γραμματέα ασκούν υπάλληλοι» is the same decoy, dressed.
+
+    10 of these in the corpus. Here the wrapped article number is followed by
+    the next sentence on the same line, so it passes the shape rule and only
+    the article's own run can refuse it — άρθρο 91 expects παρ. 2, not παρ. 83.
+    It is reported, because a refused marker that is really a paragraph and one
+    that is really a reference look identical once dropped, and only one of
+    those is acceptable.
+    """
+    split = split_paragraphs(
+        article(
+            "1. Στην Κεντρική Υπηρεσία συστήνεται επιτροπή του άρθρου\n"
+            "83. Χρέη εισηγητή και γραμματέα ασκούν υπάλληλοι.\n"
+            "2. Με απόφαση του Υπουργού."
+        )
+    )
+
+    assert [p.number for p in split.paragraphs] == ["1", "2"]
+    assert split.refused_markers == [
+        "83. Χρέη εισηγητή και γραμματέα ασκούν υπάλληλοι."
+    ]
+
+
+def test_an_amended_acts_paragraphs_are_suppressed_and_reported() -> None:
+    """ν. 5110/2024 άρθρο 61 reprints ν.δ. 398/1974's paragraphs in guillemets.
+
+    The step 5a problem one level down: the markers inside the quotation are
+    **another act's**, and admitting them files ν.δ. 398/1974's provisions
+    under «ν. 5110/2024, άρθρο 61 παρ. 2». Measured without the quotation rule,
+    the sequence rule took the quoted παρ. 2–8 as this article's own and
+    refused its real παρ. 2 — not a near miss, an inversion.
+
+    172 markers across 30 articles of that act are suppressed this way, against
+    0 in π.δ. 62/2025, which codifies and amends nothing. They are reported
+    because that count is the evidence the rule is doing work.
+    """
+    split = split_paragraphs(
+        article(
+            "1. Το άρθρο 17 του ν.δ. 398/1974 αντικαθίσταται ως εξής:\n"
+            "«Άρθρο 17\n"
+            "1. Για τον προσδιορισμό του ύψους του βοηθήματος\n"
+            "2. Με απόφαση του Υπουργού\n"
+            "3. Η ως άνω απόφαση.»\n"
+            "2. Η ισχύς του παρόντος αρχίζει από 1.1.2023."
+        )
+    )
+
+    assert [p.number for p in split.paragraphs] == ["1", "2"]
+    assert len(split.quoted_markers) == 3
+    assert split.paragraphs[1].text.startswith("Η ισχύς")
+
+
+def test_the_quotation_scope_resets_at_every_article() -> None:
+    """A ratification quotation spans articles, and must not silence them.
+
+    ν. 5110/2024's άρθρο 13 opens «ΚΑΤΑΣΤΑΤΙΚΟ and the closing guillemet lands
+    1 183 lines later inside the instrument's άρθρο τριακοστό. Carrying
+    quotation depth across articles would leave all thirty of the καταστατικό's
+    articles permanently inside a quotation — and every one of them with no
+    paragraphs at all, which is a worse failure than the one rule 2 prevents.
+
+    Depth starting at 0 per article is also what bounds the failure mode step
+    5a rejected document-wide: an unmatched guillemet can cost this article's
+    paragraphs, never the rest of the document's.
+    """
+    opening = split_paragraphs(article("Κυρώνεται το καταστατικό:\n«ΚΑΤΑΣΤΑΤΙΚΟ", "13"))
+    inside = split_paragraphs(
+        article("1. Εκτός από την πτώχευση.\n2. Η εκκαθάριση.»", "τριακοστό")
+    )
+
+    assert [p.number for p in opening.paragraphs] == [None]
+    assert [p.number for p in inside.paragraphs] == ["1", "2"]
+
+
+def test_a_refused_marker_does_not_invalidate_what_follows_it() -> None:
+    """After a refusal the expectation still points at the next real number.
+
+    If a refused marker advanced the count, one decoy would push every
+    following paragraph out of the run and an article would lose everything
+    after its first oddity — the cascade failure `numbering_breaks` avoids at
+    article level, avoided here at paragraph level for the same reason.
+    """
+    split = split_paragraphs(
+        article("1. Πρώτη.\n83. Χρέη εισηγητή.\n2. Δεύτερη.\n3. Τρίτη.")
+    )
+
+    assert [p.number for p in split.paragraphs] == ["1", "2", "3"]
+    assert split.refused_markers == ["83. Χρέη εισηγητή."]
+
+
+def test_an_article_with_no_text_yields_no_paragraphs() -> None:
+    """Empty text produces an empty list, not a paragraph holding nothing.
+
+    No corpus article is empty today — the shortest has two lines — but a
+    `Paragraph` with empty text would be a citable provision with no content,
+    which is worse than an article that visibly has none. The boundary is
+    pinned so a future source cannot introduce one quietly.
+    """
+    assert split_paragraphs(article("")).paragraphs == []
+
+
+def test_a_paragraph_whose_case_is_glued_to_the_marker_is_still_read() -> None:
+    """«1.α) Κάθε εργοδότης …» — no space, and still παρ. 1.
+
+    Two lines in the corpus print the marker this way, and each cost more than
+    itself: missing άρθρο 578's «1.α)» meant παρ. 1 was never accepted, so
+    παρ. 2 and παρ. 3 did not continue any run and were refused too — one
+    unparsed marker taking a whole article's structure with it. The same
+    happened to άρθρο 571's «3.α)», which cost παραγράφους 4, 5 and 6.
+
+    The case letter stays in the paragraph's text, since περιπτώσεις are not
+    parsed yet and dropping it would lose the only mark of where περ. α΄ begins.
+    """
+    split = split_paragraphs(
+        article("1.α) Κάθε εργοδότης αναρτά τους όρους.\n2. Για κάθε μεταβολή.")
+    )
+
+    assert [(p.number, p.text) for p in split.paragraphs] == [
+        ("1", "α) Κάθε εργοδότης αναρτά τους όρους."),
+        ("2", "Για κάθε μεταβολή."),
+    ]
+
+
+def test_a_run_that_does_not_start_at_one_is_refused_and_reported() -> None:
+    """ν. 5110/2024's άρθρο τέταρτο prints an unnumbered lead, then «2.», «3.».
+
+    The honest cost of requiring the run to start at 1, pinned so it stays a
+    recorded choice. Both markers are refused, the article becomes one
+    unnumbered paragraph, and nothing is lost — the text is all there and the
+    two refusals are reported.
+
+    The alternative was measured: accepting whatever number the first marker
+    carries parses π.δ. 62/2025's άρθρο 503 — a classification table — as
+    παραγράφους 4 to 8, inventing five provisions that cite cleanly. Under-
+    reading one article is recoverable; inventing five is not.
+    """
+    split = split_paragraphs(
+        article("Σκοπός του Κέντρου είναι:\nα) Η παρακολούθηση.\n2. Για την επιδίωξη.")
+    )
+
+    assert [p.number for p in split.paragraphs] == [None]
+    assert split.refused_markers == ["2. Για την επιδίωξη."]
+
+
+@pytest.mark.slow
+def test_the_corpus_splits_into_the_paragraph_counts_it_was_measured_at() -> None:
+    """2 136 paragraphs, 25 refused markers, 172 suppressed as another act's.
+
+    One regression fence over all three rules at corpus scale. Each number
+    moves for a different reason: loosening the shape rule inflates the
+    paragraph count with dates and table rows, dropping the quotation rule
+    moves 172 markers from `quoted` into the paragraph count *and* inverts
+    ν. 5110/2024's άρθρο 61, and weakening the sequence rule empties
+    `refused_markers`.
+
+    The split between documents is itself the evidence: an amending law quotes
+    other acts constantly (172 suppressed markers in 30 articles) and a
+    codification quotes none (0).
+    """
+    totals = {}
+    for entry in load_manifest(DEFAULT_MANIFEST_PATH).documents:
+        normalized = normalize_document(extract_document(entry))
+        articles = [
+            *find_article_texts(normalized),
+            *(a for g in find_instrument_texts(normalized) for a in g.articles),
+        ]
+        splits = [split_paragraphs(a) for a in articles]
+        totals[entry.id] = (
+            sum(len(s.paragraphs) for s in splits),
+            sum(len(s.refused_markers) for s in splits),
+            sum(len(s.quoted_markers) for s in splits),
+        )
+
+    assert totals["fek_a_75_2024"] == (259, 2, 172)
+    assert totals["fek_a_121_2025"] == (1877, 23, 0)

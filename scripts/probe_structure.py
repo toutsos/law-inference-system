@@ -20,6 +20,7 @@ from greek_law.ingestion.structure import (
     line_coverage,
     numbering_breaks,
     rejected_heading_candidates,
+    split_paragraphs,
     unreadable_heading_lines,
 )
 
@@ -28,6 +29,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--show-rejected", action="store_true")
     parser.add_argument("--show-unreadable", action="store_true")
+    parser.add_argument("--show-refused", action="store_true")
     args = parser.parse_args()
 
     for entry in load_manifest(DEFAULT_MANIFEST_PATH).documents:
@@ -71,12 +73,35 @@ def main() -> int:
                 f"article (min {lengths[0]}, max {lengths[-1]}); "
                 f"{titled}/{len(articles)} carry a title"
             )
-        for instrument in find_instrument_texts(document):
+        instruments = find_instrument_texts(document)
+        for instrument in instruments:
             print(
                 f"  instrument {len(instrument.articles):>5}  articles of "
                 f"«{instrument.label}», ratified by άρθρο "
                 f"{instrument.ratifying_article}"
             )
+
+        splits = [
+            (item, split_paragraphs(item))
+            for item in [
+                *articles,
+                *(a for instrument in instruments for a in instrument.articles),
+            ]
+        ]
+        total = sum(len(split.paragraphs) for _, split in splits)
+        numbered = sum(
+            1 for _, split in splits for p in split.paragraphs if p.number is not None
+        )
+        print(
+            f"  paragraphs {total:>5}  {numbered} numbered, "
+            f"{total - numbered} unnumbered; "
+            f"{sum(len(s.refused_markers) for _, s in splits)} markers refused, "
+            f"{sum(len(s.quoted_markers) for _, s in splits)} inside a quotation"
+        )
+        if args.show_refused:
+            for item, split in splits:
+                for line in split.refused_markers:
+                    print(f"    refused   άρθρο {item.heading.number:<9} {line[:58]}")
         if args.show_rejected:
             for heading in rejected:
                 print(f"    rejected   p{heading.page:<4} Άρθρο {heading.number}")
