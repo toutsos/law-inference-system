@@ -11,6 +11,7 @@ them — a third document in the corpus can invalidate any of them.
 import argparse
 
 from greek_law.ingestion import DEFAULT_MANIFEST_PATH, load_manifest
+from greek_law.ingestion.assembly import assemble
 from greek_law.ingestion.extraction import extract_document
 from greek_law.ingestion.normalization import normalize_document
 from greek_law.ingestion.structure import (
@@ -101,6 +102,7 @@ def main() -> int:
             f"{sum(len(s.quoted_markers) for _, s in splits)} inside a quotation"
         )
         paths = container_paths(document)
+
         if paths:
             units = {
                 (unit.kind, unit.number, unit.title)
@@ -118,6 +120,18 @@ def main() -> int:
             if args.show_unreadable:
                 for line, count in unreadable_containers.most_common():
                     print(f"    unreadable ×{count}  {line}")
+
+        assembled = assemble(entry, document)
+        own = [a for a in assembled.act.articles if a.instrument is None]
+        print(
+            f"  assembled  {len(assembled.act.articles):>5}  articles "
+            f"({len(own)} of the act, "
+            f"{len(assembled.act.articles) - len(own)} of an instrument), "
+            f"{sum(len(a.paragraphs) for a in assembled.act.articles)} paragraphs; "
+            f"{len(assembled.untranslated)} instruments untranslated"
+        )
+        for line in assembled.untranslated:
+            print(f"    untranslated  {line}")
 
         if args.show_refused:
             for item, split in splits:
