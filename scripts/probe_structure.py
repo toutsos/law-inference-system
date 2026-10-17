@@ -18,6 +18,7 @@ from greek_law.ingestion.structure import (
     find_article_texts,
     find_instrument_texts,
     line_coverage,
+    numbering_breaks,
     rejected_heading_candidates,
     unreadable_heading_lines,
 )
@@ -42,8 +43,11 @@ def main() -> int:
                 f"  kept       {len(kept):>5}  άρθρα {kept[0].number}–"
                 f"{kept[-1].number}, PDF pp. {kept[0].page}–{kept[-1].page}"
             )
-            expected = [str(number) for number in range(1, len(kept) + 1)]
-            print(f"  contiguous 1..N  {[h.number for h in kept] == expected}")
+            breaks = numbering_breaks(kept)
+            print(
+                "  numbering        "
+                + ("unbroken" if not breaks else f"breaks at {breaks}")
+            )
         else:
             print("  kept           0  — no article sequence found")
         print(f"  rejected   {len(rejected):>5}")

@@ -24,11 +24,13 @@ from greek_law.ingestion.extraction import (
 )
 from greek_law.ingestion.normalization import normalize_document
 from greek_law.ingestion.structure import (
+    ArticleHeading,
     find_article_headings,
     find_article_texts,
     find_instrument_headings,
     find_instrument_texts,
     line_coverage,
+    numbering_breaks,
     ordinal_value,
     rejected_heading_candidates,
     unreadable_heading_lines,
@@ -336,7 +338,7 @@ def test_a_numbered_contents_entry_is_not_reported_as_unreadable() -> None:
 
 @pytest.mark.slow
 def test_each_corpus_act_parses_to_one_unbroken_article_sequence() -> None:
-    """ν. 5110/2024 yields άρθρα 1–82 and π.δ. 62/2025 άρθρα 1–588.
+    """ν. 5110/2024 yields άρθρα 1–82 and π.δ. 62/2025 άρθρα 1–588 plus 141Α.
 
     The unit tests above check each rule against hand-built pages; this one
     checks all three together against 320 pages of real gazette, where the
@@ -344,21 +346,21 @@ def test_each_corpus_act_parses_to_one_unbroken_article_sequence() -> None:
     independently verifiable — each act's last contents entry is «Άρθρο 82
     Έναρξη ισχύος» and «Άρθρο 588 Έναρξη ισχύος» respectively — so this is a
     comparison against the document's own index, not against a number this
-    parser produced once.
+    parser produced once. The decree's 589th heading is άρθρο 141Α, an inserted
+    article its contents page also lists.
 
     A contiguous 1..N is a much stronger claim than a count: a decoy admitted
     into the run, or a real article missed, breaks the sequence even when the
     total happens to look right.
     """
-    expected = {"fek_a_75_2024": 82, "fek_a_121_2025": 588}
+    expected = {"fek_a_75_2024": 82, "fek_a_121_2025": 589}
 
     for entry in load_manifest(DEFAULT_MANIFEST_PATH).documents:
         normalized = normalize_document(extract_document(entry))
-        numbers = [heading.number for heading in find_article_headings(normalized)]
+        headings = find_article_headings(normalized)
 
-        assert numbers == [
-            str(number) for number in range(1, expected[entry.id] + 1)
-        ], entry.id
+        assert numbering_breaks(headings) == [], entry.id
+        assert len(headings) == expected[entry.id], entry.id
 
 
 # ---------------------------------------------------------------------------
@@ -979,3 +981,69 @@ def test_one_corpus_title_is_known_to_swallow_a_line_of_law() -> None:
     assert article.title is not None
     assert article.title.endswith("Επιτρέπεται η απασχόληση των εργαζομένων σε")
     assert article.text.startswith("εμπορικά καταστήματα")
+
+
+# ---------------------------------------------------------------------------
+# An inserted article's number (5a amendment, 2026-10-17)
+# ---------------------------------------------------------------------------
+
+
+def test_an_inserted_article_number_is_read_with_or_without_a_space() -> None:
+    """π.δ. 62/2025 prints «Άρθρο 141 Α», and it is an article of the Code.
+
+    Found by measuring for step 5d: the original pattern accepted `141Α` glued
+    but not `141 Α` spaced, so άρθρο 141Α's 204 lines were filed as the tail of
+    άρθρο 141 — which is also why that article appeared to carry two complete
+    paragraph runs, 1–12 and then 1–9 again.
+
+    Nothing caught it. The sequence check still passed, because an article that
+    was never found is not *missing from* a run; and
+    `unreadable_heading_lines` skips the line because the character after
+    «Άρθρο » is a digit. The number is stored glued whichever way it is
+    printed, so one spelling reaches `SourceReference` and the retrieval key.
+    """
+    spaced = "Άρθρο 141\nΤίτλος\nκείμενο.\nΆρθρο 141 Α\nΤίτλος\nκείμενο.\n"
+
+    headings = find_article_headings(document(spaced))
+
+    assert [heading.number for heading in headings] == ["141", "141Α"]
+
+
+def test_a_correspondence_row_naming_an_inserted_article_is_still_refused() -> None:
+    """«Άρθρο 141 Α Άρθρο 15 ν. 5163/2024» is a table row, not a heading.
+
+    The three lookalikes the widened pattern has to keep refusing, all from
+    π.δ. 62/2025's πίνακας κωδικοποιητικών διατάξεων — this one, `Άρθρο 4 Υ Α
+    19040/1981` (a Υ.Α., not an article 4Υ) and `Άρθρο 71 Α Άρθρο 543`. Rule
+    1's closing anchor is what refuses them, which is why the space was allowed
+    only between the digits and a single letter: `^Άρθρο \\d+ [Α-Ω]$` matches
+    exactly one line in the whole corpus, the real heading on PDF page 60.
+    """
+    rows = (
+        "Άρθρο 141 Α Άρθρο 15 ν. 5163/2024 άρθρα 5 και 6 Οδηγίας (ΕΕ)\n"
+        "Άρθρο 4 Υ Α 19040/1981, όπως διαμορφώθηκε με το άρθρο\n"
+        "Άρθρο 71 Α Άρθρο 543\n"
+    )
+
+    assert find_article_headings(document(rows)) == []
+
+
+def test_numbering_breaks_accepts_an_insertion_and_reports_a_gap() -> None:
+    """141, 141Α, 142 is unbroken; a jump to 144 is not.
+
+    The contiguity claim had been written as `numbers == [str(n) for n in
+    range(...)]` in the probe and the corpus test, which άρθρο 141Α breaks — the
+    corpus's one legitimate insertion would have been reported as a parse
+    failure, and the pressure then is to weaken the check that catches decoys.
+    Stating the rule once, as a function, is what lets it be right about both.
+    """
+    headings = find_article_headings(
+        document("Άρθρο 1\nΤ\nκ.\nΆρθρο 1Α\nΤ\nκ.\nΆρθρο 2\nΤ\nκ.\n")
+    )
+    assert numbering_breaks(headings) == []
+
+    gapped = [
+        ArticleHeading(number=number, page=1, gazette_page=3001, line=0)
+        for number in ("1", "2", "4")
+    ]
+    assert numbering_breaks(gapped) == ["4"]

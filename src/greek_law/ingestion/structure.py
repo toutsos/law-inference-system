@@ -60,7 +60,7 @@ from pydantic import BaseModel, ConfigDict
 
 from greek_law.ingestion.extraction import ExtractedDocument
 
-_ARTICLE_HEADING = re.compile(r"^Άρθρο (\d+[Α-Ω]?)$")
+_ARTICLE_HEADING = re.compile(r"^Άρθρο (\d+(?: ?[Α-Ω])?)$")
 """Rule 1 — a heading is the word, a number, and nothing else on the line.
 
 Anchored at both ends, and both anchors are load-bearing. The end refuses
@@ -80,11 +80,27 @@ tracking «» nesting depth, was measured and is worse (ν. 5110/2024 holds 202
 openers against 201 closers, so one slip reclassifies the rest of the
 document).
 
-The optional ``[Α-Ω]`` admits ``Άρθρο 3Α``, the form amendments use to insert
-an article between two existing ones. Neither corpus act has one in its body,
-so this rests on legislative practice rather than measurement — but the cost is
-one-sided: matching a number that does not exist is impossible, while missing a
-real one would drop a provision silently.
+The optional ``[Α-Ω]`` admits an inserted article — the form amendments use to
+place one between two existing ones — **and the space in it is not optional
+decoration**: π.δ. 62/2025 prints ``Άρθρο 141 Α``, digits, space, letter, and
+without the space here its 204 lines were filed as the tail of άρθρο 141.
+Found 2026-10-17 while measuring for step 5d, which is where the symptom
+showed: άρθρο 141 appeared to carry two complete paragraph runs, 1–12 and then
+1–9 again.
+
+Nothing in this module caught it, and that is the part worth remembering.
+:func:`numbering_breaks` passed, because an article that was never found is not
+*missing from* a run; :func:`unreadable_heading_lines` skips the line because
+the character after «Άρθρο » is a digit. It fell through the parse and both
+reports, each for a locally good reason.
+
+The number is stored glued whichever way it is printed, so one spelling reaches
+``SourceReference.article`` and the retrieval key. Allowing the space costs
+nothing measurable: ``^Άρθρο \\d+ [Α-Ω]$`` matches **exactly one line in the
+corpus**, that heading. The πίνακας κωδικοποιητικών διατάξεων's lookalikes —
+``Άρθρο 141 Α Άρθρο 15 ν. 5163/2024``, ``Άρθρο 4 Υ Α 19040/1981`` (a Υ.Α., not
+an article 4Υ) and ``Άρθρο 71 Α Άρθρο 543`` — all carry trailing text, so the
+closing anchor refuses them exactly as before.
 """
 
 _ARTICLE_REFERENCE = re.compile(r"^Άρθρ[οα]\b")
@@ -263,6 +279,40 @@ def _order(number: str) -> tuple[int, str]:
     return int(digits), number[len(digits) :]
 
 
+def numbering_breaks(headings: Sequence[ArticleHeading]) -> list[str]:
+    """Article numbers that do not continue the act's sequence — empty is the claim.
+
+    An act's articles run 1 to N in order, exactly once, and an amendment may
+    insert a lettered article between two of them: 141, **141Α**, 142 is a
+    legitimate sequence, and so is 3, 3Α, 3Β, 4. This returns the numbers
+    fitting neither pattern, so an empty list *is* the contiguity proof step 5a
+    rests on — stated once here instead of re-derived by every caller.
+
+    It replaces the ``== list(range(1, n + 1))`` comparison the probe and the
+    tests used until π.δ. 62/2025's άρθρο 141Α was found, which that comparison
+    would have called a broken sequence: the corpus's one real insertion
+    failing the check that exists to catch decoys.
+
+    A break does not advance the expected number, so an admitted decoy is
+    reported once rather than invalidating every article after it.
+    """
+    breaks: list[str] = []
+    previous: tuple[int, str] | None = None
+    for heading in headings:
+        current = _order(heading.number)
+        expected = (1, "") if previous is None else (previous[0] + 1, "")
+        inserted = (
+            previous is not None
+            and current[0] == previous[0]
+            and current[1] > previous[1]
+        )
+        if current != expected and not inserted:
+            breaks.append(heading.number)
+            continue
+        previous = current
+    return breaks
+
+
 def _lines(document: ExtractedDocument) -> list[tuple[int, int | None, int, str]]:
     """Every line of the document in order, each carrying where it came from.
 
@@ -296,7 +346,7 @@ def _candidates(document: ExtractedDocument) -> list[ArticleHeading]:
             continue
         found.append(
             ArticleHeading(
-                number=match.group(1),
+                number=match.group(1).replace(" ", ""),
                 page=page,
                 gazette_page=gazette_page,
                 line=index,
