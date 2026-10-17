@@ -25,7 +25,10 @@ from greek_law.ingestion.extraction import (
 from greek_law.ingestion.normalization import normalize_document
 from greek_law.ingestion.structure import (
     find_article_headings,
+    find_article_texts,
     find_instrument_headings,
+    find_instrument_texts,
+    line_coverage,
     ordinal_value,
     rejected_heading_candidates,
     unreadable_heading_lines,
@@ -620,3 +623,359 @@ def test_what_the_corpus_leaves_behind_is_the_size_it_was_measured_at() -> None:
         unreadable += sum(unreadable_heading_lines(normalized).values())
 
     assert (rejected, unreadable) == (9, 4)
+
+
+# ---------------------------------------------------------------------------
+# Step 5c — where an article's text ends, and what of it is the title
+# ---------------------------------------------------------------------------
+
+
+def test_an_articles_text_runs_from_its_title_to_the_next_heading() -> None:
+    """The slice is heading-exclusive at the start and at the end.
+
+    The baseline behaviour everything else here refines. If the end were off by
+    one heading, άρθρο 1 would carry άρθρο 2's provisions under άρθρο 1's
+    citation — the phantom-article failure again, this time produced by the
+    slicer rather than by a decoy, and equally invisible in the output.
+    """
+    page = (
+        "Άρθρο 1\nΣκοπός\nΣκοπός του παρόντος είναι:\nΆρθρο 2\nΑντικείμενο\nκείμενο.\n"
+    )
+
+    first, second = find_article_texts(document(page))
+
+    assert first.title == "Σκοπός"
+    assert first.text == "Σκοπός του παρόντος είναι:"
+    assert second.title == "Αντικείμενο"
+
+
+def test_the_text_keeps_the_line_breaks_it_was_extracted_with() -> None:
+    """Lines are joined with newlines, not reflowed into prose.
+
+    Step 5d finds numbered paragraphs by a line-initial «1.», so reflowing the
+    span into one blob here would destroy the only signal the next step has.
+    Joining is 5d's decision to make after it has used the line starts, and a
+    change that "tidies" the text into a single line would break 5d silently
+    rather than loudly.
+    """
+    page = (
+        "Άρθρο 1\nΣκοπός\n1. πρώτη παράγραφος\n2. δεύτερη παράγραφος\nΆρθρο 2\nΤέλος\n"
+    )
+
+    (first, _) = find_article_texts(document(page))
+
+    assert first.text == "1. πρώτη παράγραφος\n2. δεύτερη παράγραφος"
+
+
+def test_a_container_heading_does_not_end_up_in_the_previous_article() -> None:
+    """ΜΕΡΟΣ Γ’ and its title are trimmed off the article before it.
+
+    The gazette prints a container heading between two articles, so the lines
+    belong to neither; 59 spans across the corpus end this way. Left in, every
+    ΜΕΡΟΣ and ΚΕΦΑΛΑΙΟ title becomes the closing sentence of whatever article
+    happened to precede it — text that reads as enacted provision and is a
+    section header, which is exactly the kind of wrongness no test downstream
+    can see.
+    """
+    page = (
+        "Άρθρο 1\nΣκοπός\nΣκοπός του παρόντος είναι:\n"
+        "ΜΕΡΟΣ Γ’\nΕΚΣΥΓΧΡΟΝΙΣΜΟΣ ΘΕΣΜΙΚΟΥ ΠΛΑΙΣΙΟΥ\n"
+        "Άρθρο 2\nΑντικείμενο\nκείμενο.\n"
+    )
+
+    (first, _) = find_article_texts(document(page))
+
+    assert first.text == "Σκοπός του παρόντος είναι:"
+
+
+def test_an_annex_announced_by_the_article_stays_inside_it() -> None:
+    """π.δ. 62/2025 άρθρο 490: the ΠΑΡΑΡΤΗΜΑ *is* the provision.
+
+    «Προσαρτάται και αποτελεί αναπόσπαστο μέρος του παρόντος Υποκεφαλαίου το
+    ακόλουθο παράρτημα:» — 226 lines follow, and an earlier version of the cut
+    rule treated `ΠΑΡΑΡΤΗΜΑ` as a block boundary everywhere and dropped every
+    one of them, along with the 85-line compensation table of άρθρο 333. That
+    is the one error direction with no recovery: under-cutting leaves a long
+    span the coverage report shouts about, while over-cutting deletes enacted
+    law quietly. Annex markers therefore end an article only in the document's
+    final span.
+    """
+    page = (
+        "Άρθρο 1\nΠαράρτημα\nΠροσαρτάται το ακόλουθο παράρτημα:\n"
+        "ΠΑΡΑΡΤΗΜΑ\nΔιατάξεις αναφοράς\nΆρθρο 2\nΤέλος\nκείμενο.\n"
+    )
+
+    (first, _) = find_article_texts(document(page))
+
+    assert (
+        first.text
+        == "Προσαρτάται το ακόλουθο παράρτημα:\nΠΑΡΑΡΤΗΜΑ\nΔιατάξεις αναφοράς"
+    )
+
+
+def test_the_enactment_formula_ends_the_last_article() -> None:
+    """«Παραγγέλλομε τη δημοσίευση…» is where ν. 5110/2024's body stops.
+
+    The last article's span has no next heading to end it, so it otherwise
+    absorbs the rest of the document — for ν. 5110/2024 that is 72 lines of
+    signature block: the date, the President, twenty ministers. Those lines
+    would be chunked and embedded as the text of «άρθρο 82 Έναρξη ισχύος», so a
+    question about when the law takes effect would retrieve a list of
+    ministers.
+    """
+    page = (
+        "Άρθρο 1\nΣκοπός\nκείμενο.\n"
+        "Άρθρο 2\nΈναρξη ισχύος\nΗ ισχύς του παρόντος αρχίζει.\n"
+        "Παραγγέλλομε τη δημοσίευση του παρόντος\nΑθήνα, 24 Μαΐου 2024\n"
+    )
+
+    (_, last) = find_article_texts(document(page))
+
+    assert last.text == "Η ισχύς του παρόντος αρχίζει."
+
+
+def test_a_trailing_table_ends_the_body_of_a_decree() -> None:
+    """π.δ. 62/2025 ends in a ΠΙΝΑΚΑΣ, not in an enactment formula.
+
+    Its άρθρο 588 span is 2 342 lines of which 2 are law; the rest is the
+    πίνακας κωδικοποιητικών διατάξεων — the same table rule 2 spends its
+    existence refusing as a source of phantom headings, which would arrive here
+    a second time as άρθρο 588's text. A π.δ. prints no «Παραγγέλλομε», so the
+    formula alone does not close the body and the annex markers are needed in
+    the final span.
+    """
+    page = (
+        "Άρθρο 1\nΣκοπός\nκείμενο.\n"
+        "Άρθρο 2\nΈναρξη ισχύος\nΗ ισχύς αρχίζει.\n"
+        "ΠΙΝΑΚΑΣ ΚΩΔΙΚΟΠΟΙΗΤΙΚΩΝ ΔΙΑΤΑΞΕΩΝ\nΆρθρο 1 Άρθρο 648 ΑΚ\n"
+    )
+
+    (_, last) = find_article_texts(document(page))
+
+    assert last.text == "Η ισχύς αρχίζει."
+
+
+def test_a_wrapped_title_is_joined_back_into_one_phrase() -> None:
+    """A title printed over two lines is one title, not a title plus a sentence.
+
+    74% of ν. 5110/2024's titles wrap. Taking only the first line would leave
+    «Σύσταση Ελληνικού Κέντρου Αμυντικής» as the title of άρθρο 3 and push
+    «Καινοτομίας» into the text, so the title shown beside a retrieved chunk
+    would be a fragment and the provision's text would open with a stray word.
+    """
+    page = (
+        "Άρθρο 3\nΣύσταση Ελληνικού Κέντρου Αμυντικής\nΚαινοτομίας\n"
+        "1. Συστήνεται ανώνυμη εταιρεία.\nΆρθρο 4\nΤέλος\nκείμενο.\n"
+    )
+
+    (first, _) = find_article_texts(document(page))
+
+    assert first.title == "Σύσταση Ελληνικού Κέντρου Αμυντικής Καινοτομίας"
+    assert first.text == "1. Συστήνεται ανώνυμη εταιρεία."
+
+
+def test_a_numbered_paragraph_ends_the_title() -> None:
+    """«1.» is proof the title is over, and proof there was none when it is first.
+
+    The strongest of the three signals, and the only one that is not a
+    threshold: a line opening a numbered paragraph cannot be part of a heading.
+    Without it a one-line title followed by a short «1. …» line would absorb
+    the first paragraph of the provision into the title field.
+    """
+    titled = "Άρθρο 1\nΣκοπός\n1. Σκοπός είναι:\nΆρθρο 2\nΤέλος\nκείμενο.\n"
+
+    (first, _) = find_article_texts(document(titled))
+
+    assert (first.title, first.text) == ("Σκοπός", "1. Σκοπός είναι:")
+
+
+def test_a_full_width_line_is_text_even_when_it_follows_a_title_line() -> None:
+    """A line at the column's full width was wrapped by the typesetter, not centred.
+
+    Titles are centred and therefore break early — measured maximum 47
+    characters, median 26–35 — while body lines are justified to roughly 51.
+    The threshold sits at 44 because that is where the measured error count is
+    lowest, and the test pins the discrimination rather than the number: a
+    second title line is short, a first text line is not.
+    """
+    page = (
+        "Άρθρο 209\nΕξαιρέσεις για ορισμένες Κυριακές\n"
+        "εμπορικά καταστήματα που λειτουργούν προαιρετικά\n"
+        "τις Κυριακές, σύμφωνα με τις διατάξεις.\nΆρθρο 210\nΤέλος\nκείμενο.\n"
+    )
+
+    (first, _) = find_article_texts(document(page))
+
+    assert first.title == "Εξαιρέσεις για ορισμένες Κυριακές"
+    assert first.text.startswith("εμπορικά καταστήματα")
+
+
+def test_a_line_ending_in_a_full_stop_is_text_however_short_it_is() -> None:
+    """A title never ends in sentence punctuation; a short closing line does.
+
+    Without this, the last wrapped line of a one-sentence article — «μισθός.»,
+    seven characters, well under any width threshold — reads as the second line
+    of the title, and the article's own concluding word disappears from its
+    text. Adding the rule removed every such case across the corpus but one.
+    """
+    page = (
+        "Άρθρο 3\nΈλλειψη συμφωνίας για το μισθό\n"
+        "Αν η εργασία παρέχεται μόνο με μισθό, λογίζεται\nμισθός.\n"
+        "Άρθρο 4\nΤέλος\nκείμενο.\n"
+    )
+
+    (first, _) = find_article_texts(document(page))
+
+    assert first.title == "Έλλειψη συμφωνίας για το μισθό"
+    assert first.text.endswith("μισθός.")
+
+
+def test_a_ratifying_article_does_not_absorb_the_instrument_it_enacts() -> None:
+    """άρθρο 13's text is its ratification clause, not the whole καταστατικό.
+
+    The two namespaces interleave by position, so the instrument's headings are
+    boundaries for the body article too: without them άρθρο 13's span is 1 188
+    lines of ν. 5110/2024 — thirty articles of a company statute filed as the
+    text of one article of the law, every provision in it citable only as
+    «άρθρο 13» and the instrument's own thirty articles duplicated beside it.
+    """
+    page = (
+        "Άρθρο 12\nΠόροι\nκείμενο.\n"
+        "Άρθρο 13\nΚαταστατικό\nΚυρώνεται το καταστατικό, ως εξής:\n«ΚΑΤΑΣΤΑΤΙΚΟ\n"
+        "Άρθρο πρώτο\nΝομική μορφή\nΤο ΕΛΚΑΚ λειτουργεί.\n"
+        "Άρθρο δεύτερο\nΕπωνυμία\nΗ επωνυμία είναι.\n"
+        "Άρθρο 14\nΛοιπά\nκείμενο.\n"
+    )
+
+    body = find_article_texts(document(page))
+    (instrument,) = find_instrument_texts(document(page))
+
+    ratifying = next(article for article in body if article.heading.number == "13")
+    assert ratifying.text == "Κυρώνεται το καταστατικό, ως εξής:\n«ΚΑΤΑΣΤΑΤΙΚΟ"
+    assert instrument.label == "ΚΑΤΑΣΤΑΤΙΚΟ"
+    assert instrument.ratifying_article == "13"
+    assert [(a.heading.number, a.title) for a in instrument.articles] == [
+        ("πρώτο", "Νομική μορφή"),
+        ("δεύτερο", "Επωνυμία"),
+    ]
+    assert instrument.articles[-1].text == "Η επωνυμία είναι."
+
+
+def test_every_line_of_the_document_is_accounted_for() -> None:
+    """The four coverage buckets add up to the document's line count.
+
+    The 5c analogue of step 5a's contiguity check: an arithmetic identity no
+    silent drop can satisfy. A slicer that lost a page, double-counted a span
+    or trimmed into the void would still return plausible articles — but the
+    sum would stop matching, which is why the report is a tested invariant
+    rather than a debugging aid.
+    """
+    page = (
+        "περιεχόμενα\nΆρθρο 1\nΣκοπός\nκείμενο.\n"
+        "ΜΕΡΟΣ Β’\nΤΙΤΛΟΣ\nΆρθρο 2\nΤέλος\nΗ ισχύς αρχίζει.\n"
+        "Παραγγέλλομε τη δημοσίευση"  # no trailing newline: it would add an empty line
+    )
+
+    coverage = line_coverage(document(page))
+
+    assert coverage.balances
+    assert (coverage.front_matter, coverage.between_articles, coverage.trailing) == (
+        1,
+        2,
+        1,
+    )
+
+
+@pytest.mark.slow
+def test_the_corpus_slices_at_the_sizes_it_was_measured_at() -> None:
+    """94.1% and 87.4% of corpus lines land inside an article, as measured.
+
+    A regression fence on the whole of 5c in one number per document. Every
+    boundary rule moves these: dropping the instrument boundaries inflates
+    ν. 5110/2024's article lines by 1 183, dropping the final-span rule inflates
+    π.δ. 62/2025's by 2 338, and trimming containers too eagerly deflates both.
+    The three spans that drove the design are pinned beside them, because a
+    share can stay still while two errors cancel.
+    """
+    sliced = {}
+    for entry in load_manifest(DEFAULT_MANIFEST_PATH).documents:
+        normalized = normalize_document(extract_document(entry))
+        sliced[entry.id] = (
+            find_article_texts(normalized),
+            line_coverage(normalized),
+        )
+
+    law, decree = sliced["fek_a_75_2024"], sliced["fek_a_121_2025"]
+
+    assert all(coverage.balances for _, coverage in sliced.values())
+    assert (law[1].front_matter, law[1].between_articles, law[1].trailing) == (
+        277,
+        39,
+        72,
+    )
+    assert (
+        decree[1].front_matter,
+        decree[1].between_articles,
+        decree[1].trailing,
+    ) == (744, 183, 2338)
+
+    lines = {article.heading.number: article.text.count("\n") + 1 for article in law[0]}
+    assert (lines["13"], lines["82"]) == (3, 3)
+    assert (
+        next(
+            article.text.count("\n") + 1
+            for article in decree[0]
+            if article.heading.number == "588"
+        )
+        == 2
+    )
+
+
+@pytest.mark.slow
+def test_the_katastatiko_articles_carry_their_own_titles_and_text() -> None:
+    """All thirty instrument articles come out with a title and non-empty text.
+
+    The namespace step 5b went to the trouble of separating is only worth
+    separating if its provisions are readable, and «Σύνθεση του Διοικητικού
+    Συμβουλίου» — άρθρο δέκατο πέμπτο — is the provision the V2 note has used
+    since 2026-09-07 to state why one ΦΕΚ carries two numberings. An empty text
+    here would mean the second namespace is located and lost.
+    """
+    for entry in load_manifest(DEFAULT_MANIFEST_PATH).documents:
+        if entry.id != "fek_a_75_2024":
+            continue
+        normalized = normalize_document(extract_document(entry))
+        (instrument,) = find_instrument_texts(normalized)
+
+    assert len(instrument.articles) == 30
+    assert all(article.title for article in instrument.articles)
+    assert all(article.text for article in instrument.articles)
+
+    fifteenth = instrument.articles[14]
+    assert fifteenth.heading.number == "δέκατο πέμπτο"
+    assert fifteenth.title == "Σύνθεση του Διοικητικού Συμβουλίου"
+
+
+@pytest.mark.slow
+def test_one_corpus_title_is_known_to_swallow_a_line_of_law() -> None:
+    """π.δ. 62/2025 άρθρο 209 is the measured failure of the title rule.
+
+    Recorded as a known defect rather than left to be discovered: its first
+    text line is 33 characters and ends in no punctuation, so nothing
+    distinguishes it from a wrapped title and «Επιτρέπεται η απασχόληση των
+    εργαζομένων σε» is filed as part of the title. The text still begins mid
+    sentence, so the provision loses its opening clause in the field a reader
+    checks a citation against — one article in 670, against 614 titles the rule
+    gets exactly right. If a future change fixes it, this test fails and the
+    V2 note's debt entry comes out.
+    """
+    for entry in load_manifest(DEFAULT_MANIFEST_PATH).documents:
+        if entry.id != "fek_a_121_2025":
+            continue
+        articles = find_article_texts(normalize_document(extract_document(entry)))
+
+    article = next(a for a in articles if a.heading.number == "209")
+
+    assert article.title is not None
+    assert article.title.endswith("Επιτρέπεται η απασχόληση των εργαζομένων σε")
+    assert article.text.startswith("εμπορικά καταστήματα")

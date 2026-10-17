@@ -15,6 +15,9 @@ from greek_law.ingestion.extraction import extract_document
 from greek_law.ingestion.normalization import normalize_document
 from greek_law.ingestion.structure import (
     find_article_headings,
+    find_article_texts,
+    find_instrument_texts,
+    line_coverage,
     rejected_heading_candidates,
     unreadable_heading_lines,
 )
@@ -48,7 +51,28 @@ def main() -> int:
             f"  unreadable {sum(unreadable.values()):>5}  "
             f"in {len(unreadable)} distinct lines"
         )
-
+        coverage = line_coverage(document)
+        print(
+            f"  lines      {coverage.in_articles:>5}  in articles "
+            f"({coverage.in_articles / coverage.total:.1%} of {coverage.total}); "
+            f"{coverage.front_matter} front matter, {coverage.between_articles} "
+            f"between, {coverage.trailing} trailing — balances {coverage.balances}"
+        )
+        articles = find_article_texts(document)
+        if articles:
+            lengths = sorted(article.text.count("\n") + 1 for article in articles)
+            titled = sum(1 for article in articles if article.title)
+            print(
+                f"  text       {lengths[len(lengths) // 2]:>5}  median lines per "
+                f"article (min {lengths[0]}, max {lengths[-1]}); "
+                f"{titled}/{len(articles)} carry a title"
+            )
+        for instrument in find_instrument_texts(document):
+            print(
+                f"  instrument {len(instrument.articles):>5}  articles of "
+                f"«{instrument.label}», ratified by άρθρο "
+                f"{instrument.ratifying_article}"
+            )
         if args.show_rejected:
             for heading in rejected:
                 print(f"    rejected   p{heading.page:<4} Άρθρο {heading.number}")
