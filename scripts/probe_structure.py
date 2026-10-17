@@ -14,6 +14,7 @@ from greek_law.ingestion import DEFAULT_MANIFEST_PATH, load_manifest
 from greek_law.ingestion.extraction import extract_document
 from greek_law.ingestion.normalization import normalize_document
 from greek_law.ingestion.structure import (
+    container_paths,
     find_article_headings,
     find_article_texts,
     find_instrument_texts,
@@ -21,6 +22,7 @@ from greek_law.ingestion.structure import (
     numbering_breaks,
     rejected_heading_candidates,
     split_paragraphs,
+    unreadable_container_lines,
     unreadable_heading_lines,
 )
 
@@ -98,6 +100,25 @@ def main() -> int:
             f"{sum(len(s.refused_markers) for _, s in splits)} markers refused, "
             f"{sum(len(s.quoted_markers) for _, s in splits)} inside a quotation"
         )
+        paths = container_paths(document)
+        if paths:
+            units = {
+                (unit.kind, unit.number, unit.title)
+                for path in paths.values()
+                for unit in path
+            }
+            depths = sorted({len(path) for path in paths.values()})
+            unreadable_containers = unreadable_container_lines(document)
+            print(
+                f"  containers {len(units):>5}  depth {depths[0]}–{depths[-1]} over "
+                f"{len(paths)} articles; "
+                f"{sum(1 for path in paths.values() if not path)} with no path, "
+                f"{sum(unreadable_containers.values())} lines unreadable"
+            )
+            if args.show_unreadable:
+                for line, count in unreadable_containers.most_common():
+                    print(f"    unreadable ×{count}  {line}")
+
         if args.show_refused:
             for item, split in splits:
                 for line in split.refused_markers:

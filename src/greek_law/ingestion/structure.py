@@ -48,10 +48,15 @@ Step 5d splits an article's text into its numbered paragraphs
 (:func:`split_paragraphs`), again by three rules — the marker's shape, whether
 it sits inside a quotation of another act, and the article's own run.
 
-The container path (ΒΙΒΛΙΟ, ΜΕΡΟΣ, ΤΜΗΜΑ, ΚΕΦΑΛΑΙΟ) is step 5e, which is where
-the lines trimmed above are claimed; the lettered περιπτώσεις inside a
-paragraph are later still. A third numbering form, «Άρθρο μόνο», is still
-unread and is what :func:`unreadable_heading_lines` now reports.
+Step 5e reads the containers — ΒΙΒΛΙΟ, ΜΕΡΟΣ, ΤΜΗΜΑ, ΚΕΦΑΛΑΙΟ, ΥΠΟΚΕΦΑΛΑΙΟ —
+and gives every article the chain in force at its position
+(:func:`container_paths`), which is what the lines trimmed above were. These
+never appear in a citation; they carry the subject matter an article's own text
+often leaves unsaid.
+
+The lettered περιπτώσεις inside a paragraph are later still. A third numbering
+form, «Άρθρο μόνο», is still unread and is what
+:func:`unreadable_heading_lines` now reports.
 """
 
 import re
@@ -62,6 +67,7 @@ from typing import NamedTuple
 
 from pydantic import BaseModel, ConfigDict
 
+from greek_law.domain import StructuralUnit
 from greek_law.ingestion.extraction import ExtractedDocument
 
 _ARTICLE_HEADING = re.compile(r"^Άρθρο (\d+(?: ?[Α-Ω])?)$")
@@ -1057,3 +1063,247 @@ def split_paragraphs(article: ArticleText) -> ArticleParagraphs:
     return ArticleParagraphs(
         paragraphs=paragraphs, refused_markers=refused, quoted_markers=quoted
     )
+
+
+_CONTAINER_KINDS = ("ΒΙΒΛΙΟ", "ΜΕΡΟΣ", "ΤΜΗΜΑ", "ΚΕΦΑΛΑΙΟ", "ΥΠΟΚΕΦΑΛΑΙΟ")
+"""The organisational levels, outermost first — the rank is the tuple's order.
+
+Measured against both corpus documents, which between them use every level and
+never invert one: ν. 5110/2024 nests ΜΕΡΟΣ > ΚΕΦΑΛΑΙΟ, π.δ. 62/2025 nests
+ΒΙΒΛΙΟ > ΜΕΡΟΣ > ΤΜΗΜΑ > ΚΕΦΑΛΑΙΟ > ΥΠΟΚΕΦΑΛΑΙΟ, and a container of the same or
+an outer level always closes the ones inside it.
+
+They are **never part of a citation** — the V0 decision that made
+:class:`~greek_law.domain.StructuralUnit` data on ``Article.path`` rather than
+a class per level. What they carry is subject matter: π.δ. 62/2025's άρθρο 219
+is «Άδεια αναψυχής» inside ΒΙΒΛΙΟ ΠΡΩΤΟ ΑΤΟΜΙΚΟ ΕΡΓΑΤΙΚΟ ΔΙΚΑΙΟ → ΜΕΡΟΣ Δ΄
+ΟΡΟΙ ΕΡΓΑΣΙΑΣ → ΤΜΗΜΑ ΙΙΙ ΑΔΕΙΕΣ → ΚΕΦΑΛΑΙΟ Α΄ ΑΔΕΙΑ ΑΝΑΨΥΧΗΣ, and none of
+those words need appear in the article's own text.
+"""
+
+_CONTAINER_NUMBERS = ("ΠΡΩΤΟ", "ΔΕΥΤΕΡΟ", "ΤΡΙΤΟ", "ΤΕΤΑΡΤΟ", "ΠΕΜΠΤΟ")
+"""Spelled-out container numbers, as a ΒΙΒΛΙΟ prints them.
+
+π.δ. 62/2025 has three books — ΒΙΒΛΙΟ ΠΡΩΤΟ, ΔΕΥΤΕΡΟ, ΤΡΙΤΟ — and the next two
+are included on the same bargain as 5b's ordinal table: the list grows on
+evidence, and a word outside it is *reported* by
+:func:`unreadable_container_lines` rather than guessed at. These are not the
+ordinals :data:`_ORDINAL_VALUE` holds, even though they are the same words:
+Greek drops the accent in all caps, so ``ΠΡΩΤΟ`` is not ``πρώτο`` lower-cased
+and the two tables cannot be merged without an accent-folding step that would
+exist only to save five lines.
+"""
+
+_CONTAINER = re.compile(
+    rf"^({'|'.join(_CONTAINER_KINDS)})\s+([Α-ΩA-Z]{{1,4}}\s*['’΄]?|{'|'.join(_CONTAINER_NUMBERS)})$"
+)
+r"""A container heading: the level, its number, and nothing else on the line.
+
+The same shape rule as :data:`_ARTICLE_HEADING`, and it works for the same
+reason — the body prints the number alone and the πίνακας περιεχομένων prints
+the title on the line::
+
+  ΜΕΡΟΣ ΣΤ’ ΤΕΛΙΚΕΣ, ΜΕΤΑΒΑΤΙΚΕΣ, ΕΞΟΥΣΙΟΔΟΤΙΚΕΣ   ← contents
+  ΜΕΡΟΣ Α’                                          ← body
+  ΣΚΟΠΟΣ - ΑΝΤΙΚΕΙΜΕΝΟ
+
+Measured: 14 body headings in ν. 5110/2024 and 77 in π.δ. 62/2025, against 16
+and 83 contents entries the closing anchor refuses.
+
+Three notations, all of them measured rather than assumed: a Greek letter with
+the ordinal mark (``Α’``, ``ΣΤ’`` — two letters), a Roman numeral (``Ι``,
+``ΙΙΙ``, ``V``), and a spelled-out word for a ΒΙΒΛΙΟ. ``{1,4}`` letters covers
+all three of the short forms without a separate branch per notation.
+
+``\s*`` before the ordinal mark is not decoration: π.δ. 62/2025 prints **``ΜΕΡΟΣ
+Γ ’``** with a space before the mark, and a pattern without it drops that
+heading — so every article from ΔΙΟΙΚΗΤΙΚΗ ΕΠΟΠΤΕΙΑ ΤΗΣ ΕΡΓΑΣΙΑΣ onwards would
+inherit the *previous* ΜΕΡΟΣ and be filed under ΕΡΓΑΤΙΚΟ ΑΤΥΧΗΜΑ. Found by
+probe, not by reading — the same class of defect as «Άρθρο 141 Α», and the
+reason :func:`unreadable_container_lines` exists.
+
+``[Α-ΩA-Z]`` admits Latin letters deliberately. The corpus mixes scripts inside
+one numbering: π.δ. 62/2025 writes ΤΜΗΜΑ Ι, ΙΙ, ΙΙΙ with the Greek iota and
+then ΤΜΗΜΑ IV, V with Latin letters, and ν. 5110/2024 prints ``ΜΕΡΟΣ E’`` with a
+Latin E. Step 4's ``residual_confusables`` never reported any of them, because
+it skips tokens containing no Greek letter at all — its recorded debt. Refusing
+them here would silently drop three containers to make a point about encoding.
+"""
+
+_BLOCK_START = re.compile(rf"^(?:Άρθρο|{'|'.join(_CONTAINER_KINDS)})\b")
+"""What ends a container's title: the next heading of any kind.
+
+A container's title is simply every line until this matches — 1 to 4 lines over
+the corpus, always all caps. No width or punctuation heuristics are needed, in
+contrast to :func:`_title_stop`, because nothing but the title can appear
+between a container heading and the next heading.
+"""
+
+_CONTAINER_NUMBER_MAX = 8
+"""Longest a container's number can be, whitespace removed — ``ΔΕΥΤΕΡΟ`` is 7.
+
+Used only by :func:`unreadable_container_lines`, to tell a heading whose number
+it cannot read from a contents entry carrying a title.
+"""
+_CONTAINER_TITLE_MAX_LINES = 6
+"""Backstop on a container title, the longest measured being 4 lines.
+
+Bounds the damage if a document ever ends on a container heading with no
+following heading at all, where "every line until the next heading" would
+otherwise swallow the signature block.
+"""
+
+
+def _container(
+    lines: Sequence[tuple[int, int | None, int, str]], place: int
+) -> StructuralUnit:
+    """Read the container heading at ``place``, with its title from the lines after.
+
+    The number keeps the notation as printed but loses internal whitespace, so
+    ``Γ ’`` is stored as ``Γ’`` — the same normalisation
+    :func:`~greek_law.domain.source_reference._slug` applies to a citation and
+    that step 5a applies to «Άρθρο 141 Α». Two spellings of one number would
+    otherwise split every filter and every golden file that touches it.
+    """
+    match = _CONTAINER.match(lines[place][3])
+    assert match is not None  # callers test _CONTAINER first
+    title = []
+    for offset in range(1, _CONTAINER_TITLE_MAX_LINES + 1):
+        if place + offset >= len(lines):
+            break
+        line = lines[place + offset][3]
+        if _BLOCK_START.match(line):
+            break
+        title.append(line.strip())
+    return StructuralUnit(
+        kind=match.group(1),
+        number="".join(match.group(2).split()),
+        title=" ".join(title) or None,
+    )
+
+
+def container_paths(
+    document: ExtractedDocument,
+) -> dict[ArticleHeading, list[StructuralUnit]]:
+    """The chain of containers in force at each article, for both namespaces.
+
+    Keyed by the heading object itself, which works because every model here is
+    ``frozen=True``: Pydantic then gives value equality and a hash, exactly as a
+    Java ``record`` gives ``equals``/``hashCode``. So the assembly step can ask
+    for the path of a heading it got from :func:`find_article_headings` without
+    inventing an identifier for articles.
+
+    **Two stacks, one per numbering namespace — the learner's call, option B.**
+    A ratified instrument brings its own containers: ν. 5110/2024's καταστατικό
+    has ΚΕΦΑΛΑΙΟ Α΄ to ΣΤ΄ of its own, printed inside άρθρο 13's quotation. One
+    stack over the document mixes them, and its thirty articles come out as
+    ``[ΜΕΡΟΣ Β’ (the law's), ΚΕΦΑΛΑΙΟ Γ’ (the statute's)]`` — two documents'
+    structure in one chain. **A path is containment within one namespace**; what
+    connects the instrument to the act is
+    :class:`~greek_law.domain.RatifiedInstrument.ratifying_article`, which 5b-i
+    already records, so nothing is lost by keeping the chains apart.
+
+    It also removes a piece of luck. Under one stack the act's own άρθρο 14 came
+    out right only because ΜΕΡΟΣ Γ΄ happens to follow the instrument
+    immediately and pops the statute's chapter; had the law resumed with a
+    deeper container, the statute's ΚΕΦΑΛΑΙΟ would have stayed in the path of
+    the law's articles.
+
+    **The scan starts at line 0, not at the first article.** The body's opening
+    containers sit in the handful of lines *before* άρθρο 1 — ΜΕΡΟΣ Α΄ two lines
+    before it in ν. 5110/2024, ΒΙΒΛΙΟ ΠΡΩΤΟ and ΜΕΡΟΣ Α΄ five and three lines
+    before it in π.δ. 62/2025. Cutting at the first heading left **15 articles
+    with an empty path** in an early probe. The contents cannot corrupt the
+    stack on the way, because its own container lines carry their titles and the
+    shape rule refuses them.
+
+    **The instrument's span ends at the first heading of any kind after its last
+    article — a container counts, and getting that wrong cost 29 articles.** The
+    first version ended the span at the next *act article*, which left the law's
+    own ΜΕΡΟΣ Γ΄ — printed between the instrument's last article and άρθρο 14 —
+    inside the instrument, so it landed on the instrument's stack and άρθρα
+    14–42 kept ΜΕΡΟΣ Β΄: a plausible path, the right length, real containers,
+    wrong subject. Option B exists to stop the instrument polluting the act's
+    path, and that version polluted it the other way round.
+
+    A container heading sitting after the instrument's last article is
+    genuinely ambiguous — it could be a chapter of the instrument with no
+    articles under it — and it is given to the act, which is the harmless
+    reading: a container with no instrument article after it can never appear in
+    an instrument's path anyway.
+
+    Measured path depths: 1–2 for ν. 5110/2024, 2–5 for π.δ. 62/2025, with no
+    article left without a path.
+    """
+    lines = _lines(document)
+    position = {(page, index): place for place, (page, _, index, _) in enumerate(lines)}
+    act = find_article_headings(document)
+    instruments = find_instrument_headings(document)
+
+    at = {position[(heading.page, heading.line)]: heading for heading in act}
+    inside: dict[int, ArticleHeading] = {}
+    spans: list[tuple[int, int]] = []
+    for group in instruments:
+        for heading in group.headings:
+            inside[position[(heading.page, heading.line)]] = heading
+        ratifying = next(
+            place
+            for place, heading in at.items()
+            if heading.number == group.ratifying_article
+        )
+        last = max(position[(h.page, h.line)] for h in group.headings)
+        following = [
+            place
+            for place in range(last + 1, len(lines))
+            if place in at or _CONTAINER.match(lines[place][3])
+        ]
+        spans.append((ratifying, following[0] if following else len(lines)))
+
+    stacks: dict[bool, list[StructuralUnit]] = {False: [], True: []}
+    paths: dict[ArticleHeading, list[StructuralUnit]] = {}
+    for place in range(len(lines)):
+        instrument = any(start <= place < stop for start, stop in spans)
+        if _CONTAINER.match(lines[place][3]):
+            unit = _container(lines, place)
+            stack = stacks[instrument]
+            rank = _CONTAINER_KINDS.index(unit.kind)
+            while stack and _CONTAINER_KINDS.index(stack[-1].kind) >= rank:
+                stack.pop()
+            stack.append(unit)
+        elif place in at:
+            paths[at[place]] = list(stacks[False])
+        elif place in inside:
+            paths[inside[place]] = list(stacks[True])
+    return paths
+
+
+def unreadable_container_lines(document: ExtractedDocument) -> Counter[str]:
+    """Container headings whose numbering notation this module has no rule for.
+
+    **The report the corpus has already proved it needs.** A heading the parser
+    cannot see is invisible to every other check — «Άρθρο 141 Α» passed
+    :func:`numbering_breaks` and :func:`unreadable_heading_lines` alike, and
+    ``ΜΕΡΟΣ Γ ’`` would have silently moved every article under it into the
+    previous ΜΕΡΟΣ. Neither is a parse error anything else can detect, because
+    a missing container leaves a *plausible* path rather than a broken one.
+
+    Defined by subtraction, like :func:`unreadable_heading_lines`: a line
+    opening with a container level that :data:`_CONTAINER` does not read, whose
+    remainder is **short enough to be a number and nothing else** — at most
+    eight characters once whitespace is removed. That bound is the only
+    heuristic in this function, and it is what separates a broken heading from a
+    contents entry: ``ΜΕΡΟΣ Γ ’`` leaves two characters, while the shortest
+    contents entry in the corpus, ``ΚΕΦΑΛΑΙΟ Α’ ΑΠΕΡΓΙΑ``, leaves nine. Without
+    a bound the report would list all 99 contents entries, which is how a
+    report gets ignored. Empty over both corpus documents.
+    """
+    counts: Counter[str] = Counter()
+    for page in document.pages:
+        for line in page.text.split("\n"):
+            match = re.match(rf"^(?:{'|'.join(_CONTAINER_KINDS)})\s+(\S.*)$", line)
+            if match is None or _CONTAINER.match(line):
+                continue
+            remainder = "".join(match.group(1).split())
+            if len(remainder) <= _CONTAINER_NUMBER_MAX:
+                counts[line] += 1
+    return counts

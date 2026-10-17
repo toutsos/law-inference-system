@@ -26,6 +26,7 @@ from greek_law.ingestion.normalization import normalize_document
 from greek_law.ingestion.structure import (
     ArticleHeading,
     ArticleText,
+    container_paths,
     find_article_headings,
     find_article_texts,
     find_instrument_headings,
@@ -35,6 +36,7 @@ from greek_law.ingestion.structure import (
     ordinal_value,
     rejected_heading_candidates,
     split_paragraphs,
+    unreadable_container_lines,
     unreadable_heading_lines,
 )
 
@@ -1379,3 +1381,253 @@ def test_the_corpus_splits_into_the_paragraph_counts_it_was_measured_at() -> Non
 
     assert totals["fek_a_75_2024"] == (259, 2, 172)
     assert totals["fek_a_121_2025"] == (1877, 23, 0)
+
+
+# ---------------------------------------------------------------------------
+# Step 5e — the container path
+# ---------------------------------------------------------------------------
+
+
+def path_of(document: ExtractedDocument, number: str) -> list[str]:
+    """The container path of one article, as «KIND NUMBER» strings.
+
+    Comparing rendered strings rather than StructuralUnit objects keeps each
+    assertion readable as the chain it is describing; the titles are checked
+    separately, where that is what the test is about.
+    """
+    paths = container_paths(document)
+    heading = next(key for key in paths if key.number == number)
+    return [f"{unit.kind} {unit.number}" for unit in paths[heading]]
+
+
+CONTAINED = (
+    "ΜΕΡΟΣ Α’\nΣΚΟΠΟΣ\nΆρθρο 1\nΣκοπός\nκείμενο.\n"
+    "ΜΕΡΟΣ Β’\nΡΥΘΜΙΣΕΙΣ\nΚΕΦΑΛΑΙΟ Α’\nΓΕΝΙΚΑ\nΆρθρο 2\nΤίτλος\nκείμενο.\n"
+    "ΚΕΦΑΛΑΙΟ Β’\nΕΙΔΙΚΑ\nΆρθρο 3\nΤίτλος\nκείμενο.\n"
+)
+"""Two ΜΕΡΟΣ, two ΚΕΦΑΛΑΙΟ, three articles — the shape both acts print."""
+
+
+def test_a_container_heading_is_its_number_alone_on_its_line() -> None:
+    """«ΜΕΡΟΣ Α’» then its title beneath, exactly as the body prints it.
+
+    The containers are the only place the document says what an article is
+    *about*: an article's own text often never names its subject. Without them
+    `Article.path` stays empty, a chunk reaches V3 with no subject context, and
+    [[V5 - Hybrid Retrieval]] has nothing to filter «what does the Code say
+    about leave» against.
+    """
+    assert path_of(document(CONTAINED), "1") == ["ΜΕΡΟΣ Α’"]
+    assert path_of(document(CONTAINED), "2") == ["ΜΕΡΟΣ Β’", "ΚΕΦΑΛΑΙΟ Α’"]
+
+
+def test_a_contents_entry_keeps_its_title_on_the_container_line() -> None:
+    """«ΜΕΡΟΣ ΣΤ’ ΤΕΛΙΚΕΣ, ΜΕΤΑΒΑΤΙΚΕΣ…» is the πίνακας περιεχομένων.
+
+    The same shape rule that separates an article heading from its contents
+    entry, and it has to hold here for the same reason: the contents lists
+    every container in reverse-chronological nonsense order relative to the
+    body, so admitting those entries would push the whole act under whichever
+    container the contents happened to list last. 16 such lines in
+    ν. 5110/2024 and 83 in π.δ. 62/2025.
+    """
+    contents = (
+        "ΜΕΡΟΣ ΣΤ’ ΤΕΛΙΚΕΣ, ΜΕΤΑΒΑΤΙΚΕΣ, ΕΞΟΥΣΙΟΔΟΤΙΚΕΣ\n"
+        "Άρθρο 78 Εξουσιοδοτικές διατάξεις\n"
+        "ΜΕΡΟΣ Α’\nΣΚΟΠΟΣ\nΆρθρο 1\nΣκοπός\nκείμενο.\nΆρθρο 2\nΤίτλος\nκείμενο.\n"
+    )
+
+    assert path_of(document(contents), "1") == ["ΜΕΡΟΣ Α’"]
+
+
+def test_the_containers_before_the_first_article_belong_to_the_body() -> None:
+    """The act's opening containers are printed *above* άρθρο 1, not after it.
+
+    ΜΕΡΟΣ Α’ sits two lines before άρθρο 1 in ν. 5110/2024; ΒΙΒΛΙΟ ΠΡΩΤΟ and
+    ΜΕΡΟΣ Α’ five and three lines before it in π.δ. 62/2025. An early version of
+    this scan started at the first article heading and left **15 articles with
+    an empty path** for that reason alone — the act's whole first part
+    unlabelled, with nothing failing.
+    """
+    assert path_of(document(CONTAINED), "1") == ["ΜΕΡΟΣ Α’"]
+
+
+def test_a_container_title_is_every_line_until_the_next_heading() -> None:
+    """A wrapped container title is one title, joined.
+
+    Measured 1–4 lines across the corpus — ΜΕΡΟΣ Γ’ of ν. 5110/2024 takes four.
+    Nothing but the title can appear between a container heading and the next
+    heading, which is why this needs none of the width and punctuation signals
+    an article title needs.
+    """
+    wrapped = (
+        "ΜΕΡΟΣ Γ’\nΕΚΣΥΓΧΡΟΝΙΣΜΟΣ ΘΕΣΜΙΚΟΥ ΠΛΑΙΣΙΟΥ\n"
+        "ΑΝΩΤΑΤΩΝ ΣΤΡΑΤΙΩΤΙΚΩΝ ΕΚΠΑΙΔΕΥΤΙΚΩΝ\nΙΔΡΥΜΑΤΩΝ\n"
+        "Άρθρο 1\nΤίτλος\nκείμενο.\nΆρθρο 2\nΤίτλος\nκείμενο.\n"
+    )
+
+    paths = container_paths(document(wrapped))
+    (unit,) = next(path for path in paths.values())
+
+    assert unit.title == (
+        "ΕΚΣΥΓΧΡΟΝΙΣΜΟΣ ΘΕΣΜΙΚΟΥ ΠΛΑΙΣΙΟΥ ΑΝΩΤΑΤΩΝ ΣΤΡΑΤΙΩΤΙΚΩΝ ΕΚΠΑΙΔΕΥΤΙΚΩΝ ΙΔΡΥΜΑΤΩΝ"
+    )
+
+
+def test_an_outer_container_closes_the_ones_inside_it() -> None:
+    """ΜΕΡΟΣ Β’ ends ΚΕΦΑΛΑΙΟ Α’; it does not nest under it.
+
+    The rank is what makes a flat sequence of headings into a tree. Without the
+    pop, every container ever opened would stay in the path and άρθρο 3 would
+    claim to be inside ΚΕΦΑΛΑΙΟ Α’ of a ΜΕΡΟΣ that ended pages earlier — a path
+    that is wrong in a way no count or sum can detect, because it is the right
+    length and full of real containers.
+    """
+    sequence = (
+        "ΜΕΡΟΣ Α’\nΠΡΩΤΟ\nΚΕΦΑΛΑΙΟ Α’\nΓΕΝΙΚΑ\nΆρθρο 1\nΤ\nκ.\n"
+        "ΜΕΡΟΣ Β’\nΔΕΥΤΕΡΟ\nΆρθρο 2\nΤ\nκ.\nΆρθρο 3\nΤ\nκ.\n"
+    )
+
+    assert path_of(document(sequence), "1") == ["ΜΕΡΟΣ Α’", "ΚΕΦΑΛΑΙΟ Α’"]
+    assert path_of(document(sequence), "2") == ["ΜΕΡΟΣ Β’"]
+
+
+def test_a_container_of_the_same_level_replaces_its_predecessor() -> None:
+    """ΚΕΦΑΛΑΙΟ Β’ succeeds ΚΕΦΑΛΑΙΟ Α’ rather than nesting inside it."""
+    assert path_of(document(CONTAINED), "3") == ["ΜΕΡΟΣ Β’", "ΚΕΦΑΛΑΙΟ Β’"]
+
+
+def test_a_number_with_a_space_before_its_ordinal_mark_is_read() -> None:
+    """π.δ. 62/2025 prints «ΜΕΡΟΣ Γ ’», and dropping it would move 80 articles.
+
+    Found by probe while measuring for this step, like «Άρθρο 141 Α» before it.
+    A pattern requiring the mark to touch the letter misses this heading, and
+    then every article from ΔΙΟΙΚΗΤΙΚΗ ΕΠΟΠΤΕΙΑ ΤΗΣ ΕΡΓΑΣΙΑΣ onwards inherits
+    the previous ΜΕΡΟΣ and is filed under ΕΡΓΑΤΙΚΟ ΑΤΥΧΗΜΑ — a plausible path,
+    which is why nothing else could catch it.
+
+    The number is stored with the space removed, so one spelling reaches every
+    filter and every golden file.
+    """
+    spaced = "ΜΕΡΟΣ Γ ’\nΔΙΟΙΚΗΤΙΚΗ ΕΠΟΠΤΕΙΑ\nΆρθρο 1\nΤ\nκ.\nΆρθρο 2\nΤ\nκ.\n"
+
+    assert path_of(document(spaced), "1") == ["ΜΕΡΟΣ Γ’"]
+
+
+def test_roman_latin_and_spelled_out_container_numbers_are_read() -> None:
+    """ΤΜΗΜΑ Ι, ΤΜΗΜΑ IV, ΜΕΡΟΣ E’, ΒΙΒΛΙΟ ΠΡΩΤΟ — all four notations.
+
+    The corpus mixes scripts *inside one numbering*: π.δ. 62/2025 writes ΤΜΗΜΑ
+    Ι, ΙΙ, ΙΙΙ with the Greek iota and ΤΜΗΜΑ IV, V with Latin letters, and
+    ν. 5110/2024 prints ΜΕΡΟΣ E’ with a Latin E. Step 4's `residual_confusables`
+    reported none of them, because it skips tokens with no Greek letter at all —
+    its recorded debt. Refusing them here would drop three real containers to
+    make a point about encoding, so the numbers are read as printed and the
+    fold stays step 4's problem.
+    """
+    mixed = (
+        "ΒΙΒΛΙΟ ΠΡΩΤΟ\nΑΤΟΜΙΚΟ ΔΙΚΑΙΟ\nΜΕΡΟΣ E’\nΛΟΙΠΕΣ\n"
+        "ΤΜΗΜΑ IV\nΑΠΟΣΠΑΣΗ\nΆρθρο 1\nΤ\nκ.\nΆρθρο 2\nΤ\nκ.\n"
+    )
+
+    assert path_of(document(mixed), "1") == [
+        "ΒΙΒΛΙΟ ΠΡΩΤΟ",
+        "ΜΕΡΟΣ E’",
+        "ΤΜΗΜΑ IV",
+    ]
+
+
+def test_a_ratified_instruments_containers_stay_out_of_the_acts_path() -> None:
+    """The καταστατικό's ΚΕΦΑΛΑΙΟ is the statute's, not the law's.
+
+    Two stacks, one per numbering namespace — the third time this document's two
+    namespaces force the same answer. Under a single stack the instrument's
+    articles come out as [ΜΕΡΟΣ Β’ (the law's), ΚΕΦΑΛΑΙΟ Α’ (the statute's)],
+    two documents' structure in one chain, and the act's own next article keeps
+    the statute's chapter unless a container of equal or outer rank happens to
+    follow immediately. In ν. 5110/2024 one does — ΜΕΡΟΣ Γ’ — so a single stack
+    is right there **by luck**, which is exactly what this test removes.
+
+    A path is containment within one namespace; what ties the instrument to the
+    act is `RatifiedInstrument.ratifying_article`, recorded in step 5b-i.
+    """
+    both = (
+        "ΜΕΡΟΣ Β’\nΤΟ ΚΕΝΤΡΟ\n"
+        "Άρθρο 1\nΣκοπός\nκείμενο.\n"
+        "Άρθρο 2\nΚαταστατικό\nΚυρώνεται ως εξής:\n«ΚΑΤΑΣΤΑΤΙΚΟ\n"
+        "ΚΕΦΑΛΑΙΟ Α’\nΝΟΜΙΚΗ ΜΟΡΦΗ\nΆρθρο πρώτο\nΝομική μορφή\nκείμενο.\n"
+        "ΚΕΦΑΛΑΙΟ Β’\nΟΡΓ ΑΝΑ\nΆρθρο δεύτερο\nΔιοίκηση\nκείμενο.»\n"
+        "ΚΕΦΑΛΑΙΟ Α’\nΑΛΛΑ\nΆρθρο 3\nΛοιπά\nκείμενο.\n"
+    )
+
+    assert path_of(document(both), "2") == ["ΜΕΡΟΣ Β’"]
+    assert path_of(document(both), "πρώτο") == ["ΚΕΦΑΛΑΙΟ Α’"]
+    assert path_of(document(both), "δεύτερο") == ["ΚΕΦΑΛΑΙΟ Β’"]
+    assert path_of(document(both), "3") == ["ΜΕΡΟΣ Β’", "ΚΕΦΑΛΑΙΟ Α’"]
+
+
+def test_a_container_number_with_no_rule_is_reported() -> None:
+    """A notation the pattern cannot read is named, not skipped.
+
+    The report the corpus proved it needs twice over: «Άρθρο 141 Α» passed
+    `numbering_breaks` and `unreadable_heading_lines` alike, and «ΜΕΡΟΣ Γ ’»
+    would have moved 80 articles under the wrong ΜΕΡΟΣ. A missing container
+    leaves a path that is *plausible* — right length, real containers, wrong
+    subject — so nothing downstream can notice it. A digit-numbered ΜΕΡΟΣ and a
+    book number outside the five-word table are both unread today.
+    """
+    odd = "ΜΕΡΟΣ 7\nΑΓΝΩΣΤΟ\nΒΙΒΛΙΟ ΕΒΔΟΜΟ\nΑΓΝΩΣΤΟ\nΆρθρο 1\nΤ\nκ.\nΆρθρο 2\nΤ\nκ.\n"
+
+    assert unreadable_container_lines(document(odd)) == {
+        "ΜΕΡΟΣ 7": 1,
+        "ΒΙΒΛΙΟ ΕΒΔΟΜΟ": 1,
+    }
+
+
+def test_a_contents_entry_with_a_one_word_title_is_not_reported() -> None:
+    """«ΚΕΦΑΛΑΙΟ Α’ ΑΠΕΡΓΙΑ» is a contents entry, and it nearly polluted the report.
+
+    The real near-miss: with the report's bound set on word count rather than
+    length, π.δ. 62/2025's shortest contents entry was listed as an unreadable
+    heading. One false entry in a report of two is enough to make the report
+    worthless, which is why the bound is «short enough to be a number and
+    nothing else» — nine characters here against ΜΕΡΟΣ Γ ’'s two.
+    """
+    assert unreadable_container_lines(document("ΚΕΦΑΛΑΙΟ Α’ ΑΠΕΡΓΙΑ\n")) == {}
+
+
+@pytest.mark.slow
+def test_every_corpus_article_gets_the_container_path_it_was_measured_with() -> None:
+    """All 701 articles carry a non-empty path, and nothing is unreadable.
+
+    The end-to-end claim for 5e, and the counts are the fence: 112 paths for
+    ν. 5110/2024 at depth 1–2, 589 for π.δ. 62/2025 at depth 2–5. An article
+    with an empty path means a container was missed before it; an unreadable
+    line means one was missed outright. One full path is spelled out because a
+    depth is not a check — ΤΜΗΜΑ ΙΙ and ΚΕΦΑΛΑΙΟ Ε’ are what make άρθρο 219
+    about Sunday work rather than about something else four levels up.
+    """
+    found = {}
+    for entry in load_manifest(DEFAULT_MANIFEST_PATH).documents:
+        normalized = normalize_document(extract_document(entry))
+        found[entry.id] = (
+            container_paths(normalized),
+            unreadable_container_lines(normalized),
+        )
+
+    for paths, unreadable in found.values():
+        assert unreadable == {}
+        assert all(paths.values())
+
+    law, decree = found["fek_a_75_2024"][0], found["fek_a_121_2025"][0]
+    assert (len(law), len(decree)) == (112, 589)
+    assert {len(path) for path in law.values()} == {1, 2}
+    assert {len(path) for path in decree.values()} == {2, 3, 4, 5}
+
+    heading = next(key for key in decree if key.number == "219")
+    assert [f"{unit.kind} {unit.number}" for unit in decree[heading]] == [
+        "ΒΙΒΛΙΟ ΠΡΩΤΟ",
+        "ΜΕΡΟΣ Δ’",
+        "ΤΜΗΜΑ ΙΙ",
+        "ΚΕΦΑΛΑΙΟ Ε’",
+    ]
