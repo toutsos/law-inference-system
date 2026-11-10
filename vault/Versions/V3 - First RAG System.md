@@ -39,6 +39,15 @@ _To fill during the version: embedding models compared with sanity-check results
 
 ## Notes
 
+### Hand-off from V2 — 2026-11-10
+
+What V2's chunking (steps 6–7) hands this version, and what it expects back. See [[Chunking]].
+
+- **A chunk is one paragraph: 2 136 in the corpus.** `Chunk.key` (e.g. `π.δ.62/2025/άρθρο-84/παρ-3`) is unique across the corpus — a slow test pins it — so step 4 can upsert on it.
+- **Embed `Chunk.embedding_text`, show `Chunk.text`.** The first opens with a header (citation, then article title) so short paragraphs carry their subject; the second is the law as printed. Putting the header in a prompt as quoted law would put our words in the legislator's mouth.
+- **Step 3 owes V2 a check:** 25 chunks are over 4 000 characters (`oversized_chunks`). Once the embedding model is chosen, compare them against its real limit; most multilingual models truncate silently.
+- **Citations are article + paragraph, no page.** `Chunk.document_id` resolves to the manifest entry and from there to the PDF's URL and hash. Page provenance is [[V6 - Legal Structure and Citations]] step 4's.
+
 ### Hand-off from V1 — 2026-09-07
 
 V1 closed with a measured baseline, not an anecdote. What V3 inherits, and what it owes back.
