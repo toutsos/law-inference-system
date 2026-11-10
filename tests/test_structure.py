@@ -902,6 +902,10 @@ def test_the_corpus_slices_at_the_sizes_it_was_measured_at() -> None:
     π.δ. 62/2025's by 2 338, and trimming containers too eagerly deflates both.
     The three spans that drove the design are pinned beside them, because a
     share can stay still while two errors cancel.
+
+    π.δ. 62/2025's front matter went 744 → 745 on 2026-11-10, when
+    de-hyphenation stopped gluing «Πειραιά-» onto «Δραπετσώνας-…»: the
+    continuation line now stays a line of its own. Expected, and the only move.
     """
     sliced = {}
     for entry in load_manifest(DEFAULT_MANIFEST_PATH).documents:
@@ -923,7 +927,7 @@ def test_the_corpus_slices_at_the_sizes_it_was_measured_at() -> None:
         decree[1].front_matter,
         decree[1].between_articles,
         decree[1].trailing,
-    ) == (744, 183, 2338)
+    ) == (745, 183, 2338)
 
     lines = {article.heading.number: article.text.count("\n") + 1 for article in law[0]}
     assert (lines["13"], lines["82"]) == (3, 3)

@@ -7,6 +7,7 @@ the function does what it was written to do; these prove it does what the two
 own docstring.
 """
 
+import re
 import unicodedata
 
 import pytest
@@ -563,17 +564,112 @@ def test_the_rejoined_word_stays_on_the_page_it_started_on() -> None:
     assert "διακριτικό" not in rejoined[1].text
 
 
-def test_a_hyphen_with_a_space_before_it_is_not_joined() -> None:
-    """«εκτυπωτικών -» keeps its hyphen and its line break.
+def test_a_split_word_with_a_space_before_its_hyphen_is_rejoined() -> None:
+    """«υπο -» + «χρέωση» becomes «υποχρέωση», exactly as «υπο-» would.
 
-    1546 line-final hyphens in the corpus have a space before them, and they
-    are genuinely ambiguous: «κε -» + «ντρικής» is a split word, but
-    «εκτυπωτικών -» + «εκδοτικών» is a dash between two complete words, and
-    joining that one yields «εκτυπωτικώνεκδοτικών» — a token in no language,
-    with two real words destroyed. Not joining leaves a word unmatched; joining
-    wrongly corrupts text. The asymmetry decides it.
+    pypdf puts a space before about 1 600 of the corpus's line-final hyphens,
+    and the Code's very first article reads «υπο - χρέωση» because of it. Left
+    split, neither half matches a query for «υποχρέωση» — the step 5 review's
+    most visible defect, in the text V3 embeds and V5 searches. Exactly one
+    half carries the word's accent, which is what marks it as one word.
+    """
+    page = "ο εργαζόμενος έχει υπο -\nχρέωση να παρέχει"
+
+    assert _texts(dehyphenate(_paged(page))) == [
+        "ο εργαζόμενος έχει υποχρέωση\nνα παρέχει"
+    ]
+
+
+def test_a_spaced_split_word_across_a_page_break_is_rejoined() -> None:
+    """The spaced form joins across a page edge like the glued form does.
+
+    The new case shares the page-crossing machinery of 4c rather than having
+    its own, and this pins that it does: a spaced hyphen ending a page is no
+    rarer than a glued one, and missing it would leave exactly the words at
+    page boundaries broken — the gap 4c's document-wide walk exists to close.
+    """
+    pages = _paged("εργαζομένων με τη συμπε -", "ριφορά του εργοδότη")
+
+    assert _texts(dehyphenate(pages)) == [
+        "εργαζομένων με τη συμπεριφορά",
+        "του εργοδότη",
+    ]
+
+
+def test_a_dash_between_two_accented_words_is_kept() -> None:
+    """«διαιτησίας -» + «δεύτερος» keeps its dash: both halves are accented.
+
+    π.δ. 62/2025 άρθρο 412's title. A Greek word of two or more syllables has
+    exactly one accent, so two accents mean two complete words. Joining would
+    print «διαιτησίαςδεύτερος» in a title a citation shows the reader — and
+    the capital-letter check cannot catch this one, because «δεύτερος» is
+    lowercase. Measured: always joining corrupts 37 article titles.
+    """
+    page = "Έφεση κατά απόφασης διαιτησίας -\nδεύτερος βαθμός"
+
+    assert _texts(dehyphenate(_paged(page))) == [page]
+
+
+def test_a_dash_before_two_complete_lowercase_words_is_kept() -> None:
+    """«εκτυπωτικών -» + «εκδοτικών» is a dash between words, not a split word.
+
+    Joining yields «εκτυπωτικώνεκδοτικών» — a token in no language, with two
+    real words destroyed. A missing join leaves one word unmatched; a wrong one
+    corrupts two, so the rule joins only when the accents say "one word".
     """
     page = "την κάλυψη των εκτυπωτικών -\nεκδοτικών αναγκών"
+
+    assert _texts(dehyphenate(_paged(page))) == [page]
+
+
+def test_a_dash_before_a_capital_letter_is_kept() -> None:
+    """A lowercase half followed by a capital is never one word.
+
+    Constructed: «εφαρμογής -» + «ΟΡΙΣΜΟΙ», a title separator in the shape
+    the gazette uses. The accent count alone says join — «ΟΡΙΣΜΟΙ», like all
+    capitals, carries no accent — so without this check a capitalised heading
+    word would be glued onto the end of the previous title.
+    """
+    page = "Πεδίο εφαρμογής -\nΟΡΙΣΜΟΙ"
+
+    assert _texts(dehyphenate(_paged(page))) == [page]
+
+
+def test_a_glued_hyphen_before_a_capital_is_kept() -> None:
+    """«Πειραιά-» + «Δραπετσώνας» stays apart: it is a hyphenated place name.
+
+    π.δ. 62/2025 names the shipyard zone «Πειραιά-Δραπετσώνας-Κερατσινίου-…».
+    Step 4c's glued-hyphen rule joined it into «ΠειραιάΔραπετσώνας», and did
+    the same to a title separator («υποχρεώσειςΑποβολή»). A word's
+    continuation never starts with a capital, so the check covers both shapes.
+    """
+    page = "ζώνη Πειραιά-\nΔραπετσώνας-Κερατσινίου"
+
+    assert _texts(dehyphenate(_paged(page))) == [page]
+
+
+def test_a_dash_between_capitals_is_kept() -> None:
+    """«ΕΔΡΑ -» + «ΣΚΟΠΟΣ» is left alone: capitals carry no accent at all.
+
+    ν. 5110/2024's καταστατικό prints its article titles in capitals. With no
+    accent on either side the count is zero, not one, so the rule cannot tell
+    a split word from two words — and it does not guess.
+    """
+    page = "ΕΔΡΑ -\nΣΚΟΠΟΣ"
+
+    assert _texts(dehyphenate(_paged(page))) == [page]
+
+
+def test_a_split_word_with_a_second_accent_stays_split() -> None:
+    """«από -» + «φασή του» is a known miss, pinned so a fix is visible.
+
+    Greek adds a second accent to a word before an enclitic such as «του»
+    (απόφαση → απόφασή του). Split across a line, both halves carry an accent
+    and the rule reads two words. About 20 words in the corpus are lost to this,
+    in the safe direction: one word stays split, nothing is glued. If this test
+    starts failing, the gap was closed — update it, do not revert the change.
+    """
+    page = "την από -\nφασή του υπουργού"
 
     assert _texts(dehyphenate(_paged(page))) == [page]
 
@@ -619,7 +715,8 @@ def test_an_empty_page_survives_dehyphenation() -> None:
 def test_residual_line_hyphens_counts_what_was_left() -> None:
     """The hyphens de-hyphenation declined to resolve are counted.
 
-    The ambiguous cases are a known 1546-strong gap, not an absence of them.
+    About 90 are left in the corpus — real dashes, capitals and the
+    double-accent words — and that is a known gap, not an absence of them.
     Reporting zero when the truth is "not attempted" is how the next person
     comes to believe the text is fully repaired and trusts exact matching on
     tokens that are still in halves.
@@ -659,6 +756,56 @@ def test_the_corpus_keeps_every_character_except_hyphens_and_spaces() -> None:
         after = letters(normalized.pages)
 
         assert 0 <= before - after < 0.02 * before, (document.id, before, after)
+
+
+_GLUED = re.compile(r"[α-ωάέήίόύώϊϋΐΰς][Α-ΩΆΈΉΊΌΎΏ]")
+"""A lowercase Greek letter immediately followed by a capital: two glued words."""
+
+
+@pytest.mark.slow
+def test_dehyphenation_never_glues_two_words_on_the_real_corpus() -> None:
+    """Normalization creates no lowercase-to-capital join anywhere in the corpus.
+
+    The always-join rule was measured gluing title separators into tokens like
+    «μεταχείρισηςΑπαγόρευση» — 23 of them in article titles alone. The gazette
+    already contains a handful of such tokens, so the check is that
+    normalization never *adds* one: a rule that starts gluing words shows up
+    as a count that rises, which no hand-picked sample would reveal.
+    """
+    manifest = load_manifest(DEFAULT_MANIFEST_PATH)
+
+    for document in manifest.documents:
+        extracted = extract_document(document)
+        before = sum(
+            len(_GLUED.findall(normalize_characters(page.text)))
+            for page in extracted.pages
+        )
+        after = sum(
+            len(_GLUED.findall(page.text))
+            for page in normalize_document(extracted).pages
+        )
+
+        assert after <= before, (document.id, before, after)
+
+
+@pytest.mark.slow
+def test_almost_every_line_final_hyphen_in_the_corpus_is_resolved() -> None:
+    """Fewer than 100 of the corpus's ~6 700 line-final hyphens survive.
+
+    Before the accent rule, 1 611 were left — every one a split word or a dash
+    the pipeline could not tell apart. This pins that the rule actually fires
+    on the real documents rather than only on the examples above; a change
+    that silently disabled it would bring the count back over a thousand.
+    """
+    manifest = load_manifest(DEFAULT_MANIFEST_PATH)
+
+    remaining = sum(
+        residual_line_hyphens(page.text)
+        for document in manifest.documents
+        for page in normalize_document(extract_document(document)).pages
+    )
+
+    assert remaining < 100
 
 
 SIGNATURES = (

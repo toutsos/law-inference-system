@@ -191,6 +191,10 @@ is common under pytest, so `setLevel` is the reliable call. And log with
 `logger.info("tokens=%d", n)` formats only if the level is enabled, which is
 exactly why SLF4J has `log.info("id={}", id)`.
 
+## `unicodedata.normalize` is `java.text.Normalizer`
+
+_Added 2026-11-10 (V2, de-hyphenation)._ `unicodedata.normalize("NFD", w)` is `Normalizer.normalize(w, Normalizer.Form.NFD)` — same Unicode forms, same result. The difference is in what you do next: a Python `str` is a sequence of code points, so `.count("\u0301")` counts combining accents directly, where Java's `String` is UTF-16 `char`s and you'd reach for `codePoints()` to be safe. Used in `_accents` to count the τόνος after NFD splits «ά» into «α» + U+0301.
+
 ## Notes
 
 - Recorded 2026-08-30 after four review rounds spent on a class that was really

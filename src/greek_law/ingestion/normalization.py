@@ -207,29 +207,58 @@ def normalize_whitespace(text: str) -> str:
     return "\n".join(line.strip() for line in collapsed.split("\n"))
 
 
+_ACCENT = "\u0301"
+"""COMBINING ACUTE ACCENT — the τόνος, once a vowel is decomposed with NFD."""
+
+
+def _accents(word: str) -> int:
+    """How many accent marks ``word`` carries.
+
+    NFD splits «ά» into «α» plus U+0301, so the τόνος can be counted as a
+    character. «ΐ» and «ΰ» also decompose into a dialytika plus an acute, and
+    count as one accent — correctly, since that is the word's stress.
+    """
+    return unicodedata.normalize("NFD", word).count(_ACCENT)
+
+
 def _continues_a_word(line: str, continuation: str) -> bool:
     """Whether ``line``'s trailing hyphen breaks a word ``continuation`` finishes.
 
-    A letter on both sides of the break is the whole test, and it is
-    deliberately narrow. 5065 of the corpus's 5068 line-final hyphens glued to a
-    letter are real word breaks; the three exceptions sit beside digits, where
-    joining would fuse two numbers into a third that appears nowhere in the law.
+    Two shapes, because pypdf extracts the same typesetting both ways, and one
+    check that applies to both: **a capital after a lowercase letter is never
+    the rest of a word.** It is a title separator or a hyphenated name —
+    «Πειραιά-» + «Δραπετσώνας» — and joining it glues two words together.
 
-    The 1546 hyphens with a *space* before them are excluded, and that is the
-    judgement call of this step rather than an oversight: «κε -» + «ντρικής» is
-    a split word, but «εκτυπωτικών -» + «εκδοτικών» is a dash between two whole
-    words, and nothing in the text distinguishes them — the space before the
-    hyphen is as often an extraction artefact as a real one. Resolving them
-    needs evidence this module does not have, so they are left and counted by
-    :func:`residual_line_hyphens`. A missing join leaves one token unmatched; a
-    wrong join destroys two real words and invents a third.
+    **Glued, ``υπο-``:** otherwise a letter on both sides is the whole test.
+    The corpus's only exceptions sit beside digits, where joining would fuse
+    two numbers into a third.
+
+    **Spaced, ``υπο -``:** the space is as often an extraction artefact as a
+    real one, so a split word and a dash between two words look identical.
+    Greek spelling tells them apart: a word of two or more syllables carries
+    exactly one accent, so **one accent across the two halves means one word**
+    («υπο» + «χρέωση»), and two means two words («κράτος» + «μέλος»). Zero —
+    capitals, which Greek writes unaccented — cannot be decided and is left.
+
+    Measured over the corpus: about 1 520 of 1 604 spaced breaks joined, none
+    wrongly, and no article title damaged. About 20 split words are missed — a
+    word before an enclitic takes a second accent («απόφασή του») — and that
+    miss is the safe direction: a wrong join destroys two real words and
+    invents a third, which always joining was measured doing to 37 titles.
     """
-    return (
-        len(line) >= 2
-        and line.endswith("-")
-        and line[-2].isalpha()
-        and continuation[:1].isalpha()
-    )
+    if not line.endswith("-") or not continuation[:1].isalpha():
+        return False
+    before = line[:-1].removesuffix(" ")
+    if not before[-1:].isalpha():
+        return False
+    if before[-1].islower() and continuation[0].isupper():
+        return False
+    if not line.endswith(" -"):
+        return True
+
+    head = before.rsplit(" ", 1)[-1]
+    tail = continuation.split(" ", 1)[0]
+    return _accents(head) + _accents(tail) == 1
 
 
 def dehyphenate(pages: Sequence[ExtractedPage]) -> list[ExtractedPage]:
@@ -255,7 +284,7 @@ def dehyphenate(pages: Sequence[ExtractedPage]) -> list[ExtractedPage]:
             if joined and _continues_a_word(joined[-1][1], line):
                 number, previous = joined[-1]
                 head, _, rest = line.partition(" ")
-                joined[-1] = (number, previous[:-1] + head)
+                joined[-1] = (number, previous[:-1].removesuffix(" ") + head)
                 if rest:
                     joined.append((page.number, rest))
                 continue
@@ -324,9 +353,10 @@ def strip_colophon(pages: Sequence[ExtractedPage]) -> list[ExtractedPage]:
 def residual_line_hyphens(text: str) -> int:
     """Count lines that still end in a hyphen after de-hyphenation.
 
-    The ambiguous cases are a known gap, so the pipeline reports its size for
-    the same reason :func:`residual_confusables` exists: silence would read as
-    "the text is whole" rather than "1546 words were not attempted".
+    About 90 remain in the corpus: real dashes, capitals with no accent to
+    count, and the double-accent words :func:`_continues_a_word` misses. The
+    pipeline reports the number for the same reason :func:`residual_confusables`
+    exists: silence would read as "the text is whole".
     """
     return sum(1 for line in text.split("\n") if line.endswith("-"))
 
