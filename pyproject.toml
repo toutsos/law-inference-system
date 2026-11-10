@@ -62,6 +62,7 @@ corpus = "python -m greek_law.ingestion.verify"
 baseline = "python -m experiments.baseline_no_rag.run"
 review = "python -m experiments.baseline_no_rag.review"
 test-all = "python -m pytest -m ''"
+ingest = "python -m greek_law.ingestion.ingest"
 
 [tool.poe.tasks.typecheck]
 help = "Static type check — the closest thing Python has to javac"

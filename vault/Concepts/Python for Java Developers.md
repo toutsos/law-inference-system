@@ -195,6 +195,10 @@ exactly why SLF4J has `log.info("id={}", id)`.
 
 _Added 2026-11-10 (V2, de-hyphenation)._ `unicodedata.normalize("NFD", w)` is `Normalizer.normalize(w, Normalizer.Form.NFD)` — same Unicode forms, same result. The difference is in what you do next: a Python `str` is a sequence of code points, so `.count("\u0301")` counts combining accents directly, where Java's `String` is UTF-16 `char`s and you'd reach for `codePoints()` to be safe. Used in `_accents` to count the τόνος after NFD splits «ά» into «α» + U+0301.
 
+## `tmp_path` is `@TempDir`; `splitlines()` is not `split("\n")`
+
+_Added 2026-11-10 (V2 step 8)._ pytest's `tmp_path` fixture is JUnit 5's `@TempDir`: a fresh directory per test, injected by parameter name instead of annotation. And a trap with no Java twin: `str.splitlines()` splits on far more than `\n` — also `\r`, U+2028, U+2029, U+0085, `\x0b`, `\x0c`, `\x1c`–`\x1e`. Java's `String.lines()` splits only on `\n`, `\r` and `\r\n`. For a line-delimited *format* (JSON Lines), split on `"\n"` explicitly; `splitlines()` is for human text.
+
 ## Notes
 
 - Recorded 2026-08-30 after four review rounds spent on a class that was really
