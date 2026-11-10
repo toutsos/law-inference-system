@@ -102,7 +102,6 @@ def main() -> int:
             f"{sum(len(s.quoted_markers) for _, s in splits)} inside a quotation"
         )
         paths = container_paths(document)
-
         if paths:
             units = {
                 (unit.kind, unit.number, unit.title)
