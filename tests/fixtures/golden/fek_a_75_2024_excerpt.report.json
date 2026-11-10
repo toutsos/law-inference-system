@@ -1,0 +1,25 @@
+{
+  "document_id": "fek_a_75_2024_excerpt",
+  "chunks": 16,
+  "oversized": [],
+  "untranslated": [],
+  "numbering_breaks": [
+    "13",
+    "14",
+    "82"
+  ],
+  "rejected_heading_candidates": 0,
+  "unreadable_heading_lines": 0,
+  "unreadable_container_lines": 0,
+  "refused_paragraph_markers": 0,
+  "quoted_paragraph_markers": 6,
+  "residual_line_hyphens": 1,
+  "residual_confusables": 0,
+  "line_coverage": {
+    "total": 202,
+    "in_articles": 172,
+    "front_matter": 0,
+    "between_articles": 14,
+    "trailing": 16
+  }
+}

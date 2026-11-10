@@ -89,11 +89,25 @@ class Ingested(BaseModel):
 def ingest_document(document: CorpusDocument, root: Path = Path()) -> Ingested:
     """Extract, normalize, assemble and chunk one manifest document.
 
-    The only function that runs the pipeline end to end; everything it calls
-    was built and tested as a stage. ``root`` is where ``data/raw/`` lives,
-    as for :func:`~greek_law.ingestion.extraction.extract_document`.
+    The only function that runs the pipeline end to end from a PDF; ``root``
+    is where ``data/raw/`` lives, as for
+    :func:`~greek_law.ingestion.extraction.extract_document`.
     """
-    normalized = normalize_document(extract_document(document, root))
+    return ingest_extracted(document, extract_document(document, root))
+
+
+def ingest_extracted(
+    document: CorpusDocument, extracted: ExtractedDocument
+) -> Ingested:
+    """Everything after extraction: normalize, assemble, chunk and report.
+
+    The seam step 9's golden-file test needs. A committed fixture cannot be a
+    PDF — a downloaded ΦΕΚ never enters git, by [[Corpus Sourcing and
+    Licensing]] — so the fixture is page *text*, and the pipeline must be able
+    to start from text. ``extracted`` is pypdf's raw output, not yet
+    normalized: normalization is part of what the golden file pins.
+    """
+    normalized = normalize_document(extracted)
     assembly = assemble(document, normalized)
     chunks = chunk_act(assembly.act, document)
     return Ingested(
