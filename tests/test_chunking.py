@@ -2,12 +2,14 @@
 
 The unit tests build small acts by hand from the domain models, because
 chunking reads nothing but an assembled :class:`~greek_law.domain.Act` — no
-PDF, no parser. The Greek in them is taken from the corpus; the two slow tests
-at the end run the real documents and pin the numbers the step 6 decision was
-made on.
+PDF, no parser. The Greek in them is taken from the corpus; the slow tests at
+the end run the real documents and pin the numbers the step 6 decision was made
+on. Step 7 added the link back to the manifest and the container path.
 """
 
 from collections import Counter
+from datetime import date
+from pathlib import Path
 
 import pytest
 
@@ -17,8 +19,9 @@ from greek_law.domain import (
     Article,
     Paragraph,
     RatifiedInstrument,
+    StructuralUnit,
 )
-from greek_law.ingestion import DEFAULT_MANIFEST_PATH, load_manifest
+from greek_law.ingestion import DEFAULT_MANIFEST_PATH, CorpusDocument, load_manifest
 from greek_law.ingestion.assembly import assemble
 from greek_law.ingestion.chunking import (
     OVERSIZED_CHARS,
@@ -36,6 +39,26 @@ KATASTATIKO = RatifiedInstrument(cited_as="του καταστατικού", rat
 
 def _act(*articles: Article, identity: ActIdentity = DECREE) -> Act:
     return Act(identity=identity, articles=list(articles))
+
+
+def _document(
+    identity: ActIdentity, document_id: str = "fek_a_121_2025"
+) -> CorpusDocument:
+    return CorpusDocument(
+        id=document_id,
+        act=identity,
+        title="Κώδικας Εργατικού Δικαίου.",
+        file=Path("data/raw/20250100121.pdf"),
+        sha256="0" * 64,
+        size_bytes=1,
+        source_url="https://example.org/fek.pdf",
+        retrieved_on=date(2026, 9, 14),
+    )
+
+
+def _chunks(act: Act) -> list[Chunk]:
+    """Chunk ``act`` against a manifest entry that matches it."""
+    return chunk_act(act, _document(act.identity))
 
 
 def test_every_paragraph_becomes_one_chunk_in_order() -> None:
@@ -56,7 +79,7 @@ def test_every_paragraph_becomes_one_chunk_in_order() -> None:
         Article(number="2", paragraphs=[Paragraph(number="1", text="τρίτη")]),
     )
 
-    chunks = chunk_act(act)
+    chunks = _chunks(act)
 
     assert [(c.source.article, c.source.paragraph, c.text) for c in chunks] == [
         ("1", "1", "πρώτη"),
@@ -81,7 +104,7 @@ def test_the_chunk_text_is_the_paragraph_exactly_as_printed() -> None:
         )
     )
 
-    (chunk,) = chunk_act(act)
+    (chunk,) = _chunks(act)
 
     assert chunk.text == paragraph
 
@@ -102,7 +125,7 @@ def test_the_embedding_text_opens_with_citation_and_article_title() -> None:
         )
     )
 
-    (chunk,) = chunk_act(act)
+    (chunk,) = _chunks(act)
 
     assert chunk.embedding_text == (
         "π.δ. 62/2025, άρθρο 84 παρ. 2\n"
@@ -121,7 +144,7 @@ def test_an_article_without_a_title_gets_a_citation_only_header() -> None:
     """
     act = _act(Article(number="7", paragraphs=[Paragraph(number="1", text="κείμενο")]))
 
-    (chunk,) = chunk_act(act)
+    (chunk,) = _chunks(act)
 
     assert chunk.header == "π.δ. 62/2025, άρθρο 7 παρ. 1"
     assert "None" not in chunk.embedding_text
@@ -143,7 +166,7 @@ def test_an_unnumbered_paragraph_is_cited_at_article_level() -> None:
         identity=LAW,
     )
 
-    (chunk,) = chunk_act(act)
+    (chunk,) = _chunks(act)
 
     assert chunk.source.paragraph is None
     assert chunk.header.splitlines()[0] == "ν. 5110/2024, άρθρο 68"
@@ -167,7 +190,7 @@ def test_an_instrument_article_is_cited_as_the_instruments_own() -> None:
         identity=LAW,
     )
 
-    (chunk,) = chunk_act(act)
+    (chunk,) = _chunks(act)
 
     assert chunk.source.instrument == KATASTATIKO
     assert chunk.header.splitlines()[0] == (
@@ -183,11 +206,11 @@ def test_an_act_with_no_articles_gives_no_chunks() -> None:
     a document parsed into at least one article — that guarantee belongs to
     step 5's reports, which say why when it does not hold.
     """
-    assert chunk_act(_act()) == []
+    assert _chunks(_act()) == []
 
 
 def _chunk(text: str) -> Chunk:
-    (chunk,) = chunk_act(
+    (chunk,) = _chunks(
         _act(Article(number="1", paragraphs=[Paragraph(number="1", text=text)]))
     )
     return chunk
@@ -232,16 +255,68 @@ def test_oversized_chunks_are_reported_not_removed() -> None:
     long = "α" * (OVERSIZED_CHARS + 1)
     act = _act(Article(number="18", paragraphs=[Paragraph(text=long)]))
 
-    chunks = chunk_act(act)
+    chunks = _chunks(act)
 
     assert [c.text for c in chunks] == [long]
     assert oversized_chunks(chunks) == chunks
 
 
+def test_every_chunk_names_the_manifest_entry_it_came_from() -> None:
+    """``document_id`` is the manifest id: the link back to the published PDF.
+
+    The Definition of Done asks for a *resolvable* source reference. The act
+    identity alone names a law, not a file; only the manifest id leads to the
+    URL and SHA-256 that prove which bytes a quotation was read from.
+    """
+    act = _act(Article(number="1", paragraphs=[Paragraph(number="1", text="κείμενο")]))
+
+    (chunk,) = chunk_act(act, _document(DECREE, document_id="fek_a_121_2025"))
+
+    assert chunk.document_id == "fek_a_121_2025"
+
+
+def test_a_chunk_carries_its_articles_container_path() -> None:
+    """Every paragraph of an article gets the article's ΜΕΡΟΣ/ΚΕΦΑΛΑΙΟ path.
+
+    The path is the only metadata that lets V3 or V5 filter results to one
+    chapter of a 589-article code. Dropping it at chunking would discard
+    step 5e's work one step before anything could use it.
+    """
+    path = [
+        StructuralUnit(kind="ΜΕΡΟΣ", number="Α’", title="Ατομικές εργασιακές σχέσεις"),
+        StructuralUnit(kind="ΚΕΦΑΛΑΙΟ", number="Α’", title="Γενικές διατάξεις"),
+    ]
+    act = _act(
+        Article(
+            number="1",
+            path=path,
+            paragraphs=[
+                Paragraph(number="1", text="πρώτη"),
+                Paragraph(number="2", text="δεύτερη"),
+            ],
+        )
+    )
+
+    assert [chunk.path for chunk in _chunks(act)] == [path, path]
+
+
+def test_a_manifest_entry_for_another_act_is_refused() -> None:
+    """Chunking π.δ. 62/2025 against ν. 5110/2024's entry raises ValueError.
+
+    Every chunk would carry the wrong ``document_id`` while every citation —
+    built from the act — still read correctly, so the mistake would surface
+    only when a reader opened the linked PDF and found a different law.
+    """
+    act = _act(Article(number="1", paragraphs=[Paragraph(number="1", text="κείμενο")]))
+
+    with pytest.raises(ValueError, match="fek_a_75_2024"):
+        chunk_act(act, _document(LAW, document_id="fek_a_75_2024"))
+
+
 def _corpus_chunks() -> dict[str, list[Chunk]]:
     return {
         entry.id: chunk_act(
-            assemble(entry, normalize_document(extract_document(entry))).act
+            assemble(entry, normalize_document(extract_document(entry))).act, entry
         )
         for entry in load_manifest(DEFAULT_MANIFEST_PATH).documents
     }
@@ -287,3 +362,22 @@ def test_no_corpus_chunk_is_empty_or_headed_with_a_missing_title() -> None:
             assert chunk.text.strip(), chunk.key
             assert chunk.header.splitlines()[0] == chunk.source.citation
             assert "None" not in chunk.header, chunk.key
+
+
+@pytest.mark.slow
+def test_every_corpus_chunk_resolves_to_its_manifest_entry() -> None:
+    """Each chunk's ``document_id`` names a manifest entry for the same act.
+
+    The Definition of Done's "resolvable source reference", checked over all
+    2 136 chunks: from any chunk, the manifest yields the URL and hash of the
+    PDF its citation names. A chunk whose id led nowhere, or to another law,
+    would cite a source no reader could open.
+    """
+    entries = {
+        entry.id: entry for entry in load_manifest(DEFAULT_MANIFEST_PATH).documents
+    }
+
+    for document_chunks in _corpus_chunks().values():
+        for chunk in document_chunks:
+            assert entries[chunk.document_id].act == chunk.source.act, chunk.key
+            assert chunk.path, chunk.key

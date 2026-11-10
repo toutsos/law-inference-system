@@ -10,11 +10,17 @@ A paragraph alone can be a poor thing to embed: «2. Η παρ. 1 ισχύει �
 1.1.2025.» says nothing about its subject. So the text that gets embedded opens
 with a header naming the provision and its article's title, while the text
 that gets *shown* stays exactly as the gazette printed it.
+
+Each chunk also says which corpus document it came from — the manifest ``id``,
+which leads to the PDF's URL and SHA-256 — and where it sits in the act's
+containers. Document-level facts stay in the manifest, looked up by that id,
+rather than being copied onto every chunk. See the step 7 decision.
 """
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
-from greek_law.domain import Act, SourceReference
+from greek_law.domain import Act, SourceReference, StructuralUnit
+from greek_law.ingestion.manifest import CorpusDocument
 
 OVERSIZED_CHARS = 4000
 """Embedding text longer than this is reported by :func:`oversized_chunks`.
@@ -34,12 +40,19 @@ class Chunk(BaseModel):
     paragraph's text — and derives the rest, for the reason
     :class:`~greek_law.domain.SourceReference` derives its citation: a stored
     header could drift out of agreement with the reference it describes.
+
+    ``document_id`` is the manifest entry the text was extracted from: the
+    link from a citation back to the exact published bytes. ``path`` is the
+    article's containers (ΜΕΡΟΣ, ΚΕΦΑΛΑΙΟ, …), outermost first — metadata to
+    filter and group on, never part of a citation.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    document_id: str = Field(pattern=r"^[a-z0-9_]+$")
     source: SourceReference
     article_title: str | None = None
+    path: list[StructuralUnit] = []
     text: str
 
     @property
@@ -60,8 +73,13 @@ class Chunk(BaseModel):
         return f"{self.header}\n\n{self.text}"
 
 
-def chunk_act(act: Act) -> list[Chunk]:
+def chunk_act(act: Act, document: CorpusDocument) -> list[Chunk]:
     """One chunk per paragraph of ``act``, in the act's own order.
+
+    ``document`` is the manifest entry ``act`` was assembled from, and it must
+    describe the same act: a mismatched pair would link every chunk to the
+    wrong PDF, and every citation would still look right. So a mismatch is an
+    error, not a chunk list.
 
     Every paragraph becomes a chunk and nothing else does: a paragraph is never
     split, however long — by the step 6 decision, oversized ones are kept whole
@@ -69,8 +87,14 @@ def chunk_act(act: Act) -> list[Chunk]:
     model's limit. An unnumbered paragraph is cited at article level, which is
     unambiguous because an article has at most one.
     """
+    if document.act != act.identity:
+        raise ValueError(
+            f"manifest entry {document.id!r} describes {document.act}, "
+            f"not the act being chunked ({act.identity})"
+        )
     return [
         Chunk(
+            document_id=document.id,
             source=SourceReference(
                 act=act.identity,
                 instrument=article.instrument,
@@ -78,6 +102,7 @@ def chunk_act(act: Act) -> list[Chunk]:
                 paragraph=paragraph.number,
             ),
             article_title=article.title,
+            path=article.path,
             text=paragraph.text,
         )
         for article in act.articles
