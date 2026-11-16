@@ -1,6 +1,6 @@
 Part of [[Home]]. See [[Agent Instructions]] for how decisions/tools/checklist should be maintained.
 
-**Status:** In Progress — started 2026-11-16, with [[V2 - Document Ingestion]] step 10 (manual QA) deferred by the learner's decision; see that note's Technical debt. **Step 1 done 2026-11-16: `poe up` starts Postgres 18 + pgvector 0.8.7.** Next: step 2, the storage schema. **Hand-off from [[V1 - Minimal LLM Application]] received 2026-09-07** — the corpus, the comparison set and four inherited requirements are in the Notes below. Read that before step 1.
+**Status:** In Progress — started 2026-11-16, with [[V2 - Document Ingestion]] step 10 (manual QA) deferred by the learner's decision; see that note's Technical debt. **Step 1 done 2026-11-16: `poe up` starts Postgres 18 + pgvector 0.8.7.** **Step 2's shape settled 2026-11-16** (one `chunks` table, `jsonb` + generated filter columns, psycopg + `schema.sql`); its SQL waits on the dimension. **Step 3 done 2026-11-16: bge-m3, 1 024 dims** — so step 2's `vector(1024)` is now fixed. Next: step 2's `schema.sql`, then step 4. **Hand-off from [[V1 - Minimal LLM Application]] received 2026-09-07** — the corpus, the comparison set and four inherited requirements are in the Notes below. Read that before step 1.
 
 ## Goal
 
@@ -11,8 +11,8 @@ The first real RAG loop: embed the V2 chunks, store them in a vector store, retr
 ## Steps
 
 - [x] **1. Set up local infrastructure via `docker-compose`: Postgres + pgvector** — _Why:_ first version with a real service dependency (see Decision below and [[V0 - Project Foundation]]). Compose makes the environment start with one command (`poe up`) and be identical on any machine. Wire the connection URL through Pydantic Settings. — _Done 2026-11-16: `compose.yaml` (one `db` service, `pgvector/pgvector:0.8.7-pg18`, named volume, healthcheck, localhost-only port), `poe up`/`down`/`psql`, `Settings.database_url: PostgresDsn`. First `poe up` pulled and reported Healthy in 34 s; `pg_available_extensions` shows `vector 0.8.7` available, not yet created (step 2 creates it). 4 tests (3 in the new `tests/test_infrastructure.py`, 1 in `tests/test_config.py`), suite 268 → 272 fast + 24 `slow`. See [[Docker Compose]]._
-- [ ] **2. Design the storage schema for chunks + embeddings + metadata** — _Why:_ schema design forces the questions that matter: what's a row (a chunk), which metadata columns will be filtered on, what the embedding dimension is (fixed by the model chosen in step 3 — note the coupling). Keep it minimal; [[V6 - Legal Structure and Citations]] will extend it.
-- [ ] **3. Choose the embedding model — compare at least two on Greek text** — _Why:_ this is the highest-leverage model decision in the project and *Greek support is not a given*. Compare a hosted multilingual model (e.g. OpenAI text-embedding-3) against an open multilingual model (e.g. BGE-M3, multilingual-e5) on a handful of Greek legal sentences before committing. Record dimensions, cost, and the sanity-check results. Capture the concept as an [[Embeddings]] note.
+- [ ] **2. Design the storage schema for chunks + embeddings + metadata** — _Why:_ schema design forces the questions that matter: what's a row (a chunk), which metadata columns will be filtered on, what the embedding dimension is (fixed by the model chosen in step 3 — note the coupling). Keep it minimal; [[V6 - Legal Structure and Citations]] will extend it. — _Shape settled 2026-11-16 (option A, see Decisions); the `schema.sql` itself is written after step 3 fixes the dimension, so this step closes together with step 3._
+- [x] **3. Choose the embedding model — compare at least two on Greek text** — _Why:_ this is the highest-leverage model decision in the project and *Greek support is not a given*. Compare a hosted multilingual model (e.g. OpenAI text-embedding-3) against an open multilingual model (e.g. BGE-M3, multilingual-e5) on a handful of Greek legal sentences before committing. Record dimensions, cost, and the sanity-check results. Capture the concept as an [[Embeddings]] note. — _Done 2026-11-16: **bge-m3** (Ollama, 1 024 dims), Recall@5 1.00 / MRR 0.902 against qwen3-embedding:0.6b's 0.82 / 0.723 on the 17-question dev set `embedding-dev-v1` (disjoint from V1's q01–q10). `experiments/embedding_comparison/` (script, set, results); 8 tests in `tests/test_embedding_comparison.py` (1 `slow`). V2's oversized-chunk check closed: longest chunk 5 142 bge-m3 tokens < 8 192. Full numbers and reasoning in [[Embeddings]]._
 - [ ] **4. Implement the load pipeline: read `data/processed/` → embed → store; make it idempotent** — _Why:_ re-running ingestion must not duplicate rows — idempotency (e.g. upsert on a stable chunk ID) is the first "pipelines re-run" lesson, cheap to learn now and painful to learn in [[V12 - Production-Oriented System]].
 - [ ] **5. Implement semantic search: embed the question → similarity search → top-k chunks** — _Why:_ the core retrieval primitive. Start with exact (sequential) search — the corpus is tiny; indexes (HNSW/IVFFlat) are an optimization to adopt when scale demands it, which is itself a lesson in not pre-optimizing.
 - [ ] **6. Inspect retrieval manually before wiring in the LLM** — _Why:_ layered debugging. Run a dozen questions, read the returned chunks. If retrieval returns garbage, the generated answer is unfixable by prompting — and if you wire everything at once you can't tell which layer failed. This separation becomes formal in [[V4 - Question to Relevant Law]].
@@ -28,10 +28,23 @@ The first real RAG loop: embed the V2 chunks, store them in a vector store, retr
 - **2026-11-16 (step 1): image `pgvector/pgvector:0.8.7-pg18` via `compose.yaml` (option A), pinned, named volume, port bound to 127.0.0.1.** Rejected: building pgvector on the official `postgres` image (B — re-does published work) and a Homebrew install (C — not reproducible). Details and the PG18 volume-path gotcha in [[Docker Compose]].
 - **2026-11-16 (step 1): `CREATE EXTENSION IF NOT EXISTS vector` belongs to step 2's schema SQL, not a compose init script** — the learner's choice (option 2). Init scripts run only on a fresh volume and are silently skipped afterwards; the schema SQL runs on every load and is idempotent. Compose stays pure infrastructure.
 - **2026-11-16 (step 1): `database_url` is a `PostgresDsn`, not `str`** — a malformed URL fails when `Settings` loads, not at the first query. The default carries a committed local-only password; a hosted database later gets its URL from `.env` and is the moment to consider `SecretStr`.
+- **2026-11-16 (step 2): one `chunks` table — a row is a chunk; the whole `Chunk` as `jsonb`, filter columns promoted, the embedding beside it (option A).** Rejected: normalised `acts`/`articles`/`chunks` (B — structure nobody queries before [[V6 - Legal Structure and Citations]]) and one wide column-per-field table (C — hand-written row↔`Chunk` mapping becomes a second definition of `Chunk`). Reading a row back is `Chunk.model_validate(row["chunk"])`; Pydantic stays the only definition of the shape.
+  - **Columns:** `key text PRIMARY KEY` (step 4 upserts on it) · `chunk jsonb NOT NULL` (source of truth) · promoted, **generated from `chunk` by Postgres** (`GENERATED ALWAYS AS (…) STORED`): `document_id`, `act_type`, `act_number`, `act_year int`, `instrument_article` (null outside a ratified instrument), `article`, `paragraph` · `embedding vector(n) NOT NULL` · `embedding_model text NOT NULL` (mixing two models' vectors becomes detectable) · `embedded_text_hash text NOT NULL` (sha256 of `embedding_text`; step 4 skips unchanged chunks).
+  - **Generated columns are the tutor's refinement of A, made 2026-11-16:** A's one weakness was the promoted columns drifting from the JSON. If Postgres computes them from `chunk`, they cannot — the same "derive, never store twice" rule `SourceReference.citation` follows. Cost: the expressions are JSON paths that must follow the model's field names; a renamed field fails at insert, loudly.
+  - **The dimension `n` waits for step 3** — learner's choice over swapping steps or an unsized `vector` (which cannot be indexed).
+- **2026-11-16 (step 2): plain `schema.sql` applied by `psycopg`, every statement `IF NOT EXISTS`, starting with `CREATE EXTENSION IF NOT EXISTS vector`.** No ORM, no migration tool until the schema first *changes* (expected V5/V6). See Tools & Alternatives.
 
 ## Tools & Alternatives Considered
 
-_To fill during the version: embedding models compared with sanity-check results on Greek; DB driver/ORM choice (psycopg + SQL vs. SQLAlchemy) and why._
+**Embedding model — 2026-11-16 (step 3): bge-m3.** Compared by retrieval over the whole corpus (method B), local models only by the learner's decision. Full table, per-question analysis and the eliminated candidates in [[Embeddings]]. In one line: bge-m3 17/17 in the top 5; qwen3-embedding:0.6b 14/17 with its instruction, losing every paraphrase question and the no-shared-keyword one (d05) at rank 107, while spending ~3× the tokens on Greek.
+
+**Database access — 2026-11-16 (step 2): psycopg + plain SQL.**
+
+| Option | Java analogue | Verdict |
+| --- | --- | --- |
+| **psycopg** (3.x) + `schema.sql` | JDBC + a `.sql` script | **Chosen.** One table, a handful of queries; the SQL is the thing being learned (`<=>`, `jsonb`, `ON CONFLICT`). |
+| SQLAlchemy (ORM or Core) | JPA/Hibernate | Rejected for now: an ORM would hide exactly the vector and upsert SQL this version teaches, and would re-declare `Chunk`'s shape a third time. |
+| Alembic migrations | Flyway/Liquibase | Deferred to the first schema *change* (V5 full-text column or V6 hierarchy). Until then `IF NOT EXISTS` is enough, and a dev database can be dropped with `docker compose down -v`. |
 
 ## Definition of Done (version-specific)
 
@@ -41,6 +54,16 @@ _To fill during the version: embedding models compared with sanity-check results
 - Baseline comparison (V1 vs. V3 answers) and the failure log are recorded here.
 
 ## Notes
+
+### Hand-off from step 3 to step 4 — 2026-11-16
+
+- **Every `/api/embed` call must send `"truncate": false` and `"options": {"num_ctx": 8192}`.** Ollama's default context can be smaller than the model's, and it truncates silently. The comparison script's first run is how this surfaced (for Qwen); for bge-m3 the explicit 8 192 is what keeps the 5 142-token longest chunk whole.
+- **No query/document prefixes for bge-m3** — the question and the chunk are embedded as they are. (Qwen's instruction is moot now.)
+- **Embedding the corpus takes ~4 minutes** (252 s, one request per chunk). Step 4's `embedded_text_hash` skip is what keeps re-runs cheap; batching (several inputs per request) is the other lever if it is ever needed.
+
+### ⚠️ `q10` is no longer a pure "not found" question — 2026-11-16
+
+Found while drafting step 3's comparison questions: **π.δ. 62/2025 άρθρο 580 is titled «Ψηφιακή κάρτα εργασίας».** V1's `q10` asks which article *of ν. 5110/2024* governs the digital work card; it was written when the corpus was that one law. The correct answer is still "none in ν. 5110/2024" — but retrieval over the whole corpus will now (rightly) surface άρθρο 580 of a different act. So the canary changes meaning in step 9: the failure to watch for is the model **attributing άρθρο 580 to ν. 5110/2024**, a citation that looks grounded and is wrong. The best answer is "not in ν. 5110/2024; π.δ. 62/2025 άρθρο 580 covers it". Decide in step 9 whether the annotation for `q10` needs a new expected outcome; do not edit `questions.json` (set `n5110-2024-v1` must stay comparable to V1).
 
 ### Hand-off from V2 — 2026-11-10
 

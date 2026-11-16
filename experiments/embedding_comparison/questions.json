@@ -1,0 +1,109 @@
+{
+  "set_version": "embedding-dev-v1",
+  "note": "Development set for V3 step 3: choosing the embedding model by retrieval quality (Recall@5, MRR) over the whole corpus. Deliberately disjoint from n5110-2024-v1 (V1's q01-q10), which is V3 step 9's measurement and must not be used to choose the model. Mostly everyday phrasing, avoiding the article's own vocabulary, so the set separates models on meaning rather than keyword overlap. A question is a hit if ANY of its expected_keys is in the top k. The digital work card (π.δ. 62/2025 άρθρο 580) is left out on purpose: it is q10's topic.",
+  "corpus_document_ids": ["fek_a_121_2025", "fek_a_75_2024"],
+  "questions": [
+    {
+      "id": "d01",
+      "text": "Πόσο μπορεί να κρατήσει η δοκιμαστική περίοδος σε μια σύμβαση αορίστου χρόνου;",
+      "expected_keys": ["π.δ.62/2025/άρθρο-2/παρ-1"],
+      "probes": "Close to the title's own wording: the baseline every model should hit."
+    },
+    {
+      "id": "d02",
+      "text": "Πότε πρέπει να μου καταβληθεί ο μισθός;",
+      "expected_keys": ["π.δ.62/2025/άρθρο-8"],
+      "probes": "A short question: little text to embed."
+    },
+    {
+      "id": "d03",
+      "text": "Μπορεί ο εργοδότης να κρατήσει μέρος του μισθού μου επειδή του χρωστάω χρήματα;",
+      "expected_keys": ["π.δ.62/2025/άρθρο-157"],
+      "probes": "Everyday wording; the law says «συμψηφισμός», which the question never uses."
+    },
+    {
+      "id": "d04",
+      "text": "Τι θεωρείται σεξουαλική παρενόχληση στη δουλειά και απαγορεύεται;",
+      "expected_keys": ["π.δ.62/2025/άρθρο-60/παρ-1", "π.δ.62/2025/άρθρο-60/παρ-2"],
+      "probes": "The prohibition (παρ. 1) and the definition (παρ. 2) both answer it."
+    },
+    {
+      "id": "d05",
+      "text": "Δουλεύω από το σπίτι, ποιος πληρώνει τον υπολογιστή και το ίντερνετ;",
+      "expected_keys": ["π.δ.62/2025/άρθρο-130/παρ-4"],
+      "probes": "No shared keyword at all: «τηλεργασία», «εξοπλισμός», «τηλεπικοινωνίες» never appear. Purely about meaning."
+    },
+    {
+      "id": "d06",
+      "text": "Μπορεί ο εργοδότης να με παρακολουθεί με κάμερα όσο δουλεύω εξ αποστάσεως;",
+      "expected_keys": ["π.δ.62/2025/άρθρο-130/παρ-8"],
+      "probes": "Picking the right paragraph among the eleven of one article."
+    },
+    {
+      "id": "d07",
+      "text": "Πόσο παραπάνω πληρώνεται η δουλειά μετά τις 10 το βράδυ;",
+      "expected_keys": ["π.δ.62/2025/άρθρο-150/παρ-1"],
+      "probes": "«10 το βράδυ» against the text's «22:00»: a number written two ways."
+    },
+    {
+      "id": "d08",
+      "text": "Πόσο πληρώνεται κάθε ώρα νόμιμης υπερωρίας;",
+      "expected_keys": ["π.δ.62/2025/άρθρο-194/παρ-3"],
+      "probes": "Legal overtime (παρ. 3, +40%) against illegal overtime (παρ. 5, +120%) in the same article."
+    },
+    {
+      "id": "d09",
+      "text": "Πόσα παραπάνω πρέπει να πάρω αν δουλέψω Κυριακή;",
+      "expected_keys": ["π.δ.62/2025/άρθρο-219/παρ-1"],
+      "probes": "Competes with the Sunday-rest articles 203-211, which say «Κυριακή» more often."
+    },
+    {
+      "id": "d10",
+      "text": "Πόσες μέρες άδεια παίρνει ένας πατέρας όταν γεννηθεί το παιδί του;",
+      "expected_keys": ["π.δ.62/2025/άρθρο-230/παρ-1"],
+      "probes": "A paraphrase of «άδεια πατρότητας»."
+    },
+    {
+      "id": "d11",
+      "text": "Πόσες εβδομάδες διαρκεί η άδεια μητρότητας;",
+      "expected_keys": ["π.δ.62/2025/άρθρο-236/παρ-1"],
+      "probes": "Competes with άρθρο 291 «Προστασία μητρότητας» and άρθρο 50."
+    },
+    {
+      "id": "d12",
+      "text": "Πόσες μέρες άδεια δικαιούμαι όταν παντρευτώ;",
+      "expected_keys": ["π.δ.62/2025/άρθρο-241"],
+      "probes": "«παντρευτώ» against the text's «τέλεση γάμου»."
+    },
+    {
+      "id": "d13",
+      "text": "Μετά από πόσο καιρό δουλειάς δικαιούμαι ετήσια άδεια με αποδοχές και πόσες μέρες;",
+      "expected_keys": ["π.δ.62/2025/άρθρο-175", "π.δ.62/2025/άρθρο-221/παρ-1"],
+      "probes": "The answer is spread over two articles; either counts."
+    },
+    {
+      "id": "d14",
+      "text": "Τι αποζημίωση παίρνω αν με απολύσουν χωρίς προειδοποίηση μετά από 5 χρόνια δουλειάς;",
+      "expected_keys": ["π.δ.62/2025/άρθρο-333/παρ-1"],
+      "probes": "An oversized chunk with a flattened table in it; competes with άρθρο 334 (dismissal with notice)."
+    },
+    {
+      "id": "d15",
+      "text": "Πόσο νωρίτερα πρέπει να με ειδοποιήσει ο εργοδότης πριν με απολύσει;",
+      "expected_keys": ["π.δ.62/2025/άρθρο-331"],
+      "probes": "«απόλυση» in the question against the text's «καταγγελία»."
+    },
+    {
+      "id": "d16",
+      "text": "Επιτρέπεται στον στρατό να κόβει δέντρα γύρω από στρατόπεδα για να προλάβει πυρκαγιές;",
+      "expected_keys": ["ν.5110/2024/άρθρο-68"],
+      "probes": "The other act, in everyday wording."
+    },
+    {
+      "id": "d17",
+      "text": "Μπορούν τα στελέχη των Ενόπλων Δυνάμεων να κάνουν μεταδιδακτορική έρευνα ή fellowship;",
+      "expected_keys": ["ν.5110/2024/άρθρο-40"],
+      "probes": "An amending article: its text is mostly «in law X the words Y are replaced», so the meaning sits largely in the title."
+    }
+  ]
+}
