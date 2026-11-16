@@ -12,6 +12,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from pydantic import HttpUrl
 
 from greek_law.domain import (
     Act,
@@ -51,7 +52,7 @@ def _document(
         file=Path("data/raw/20250100121.pdf"),
         sha256="0" * 64,
         size_bytes=1,
-        source_url="https://example.org/fek.pdf",
+        source_url=HttpUrl("https://example.org/fek.pdf"),
         retrieved_on=date(2026, 9, 14),
     )
 

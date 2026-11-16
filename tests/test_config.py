@@ -86,6 +86,22 @@ def test_ollama_model_can_be_overridden_by_env_var(monkeypatch):
     assert settings.ollama_model == "qwen3:30b"
 
 
+def test_a_malformed_database_url_is_rejected_at_startup(monkeypatch):
+    """A DATABASE_URL that is not a Postgres URL fails when Settings loads.
+
+    This is `PostgresDsn` earning its place over `str`. With a plain string,
+    `postgres:/localhost/greek_law` (one slash) or an `http://` URL pasted from
+    the wrong line is accepted here and fails only at the first query, deep in
+    the load pipeline, as a driver error that does not mention the setting.
+    """
+    monkeypatch.setenv("DATABASE_URL", "http://localhost:5432/greek_law")
+
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(_env_file=None)
+
+    assert "database_url" in str(exc_info.value)
+
+
 def test_the_ollama_port_default_is_the_conventional_one(monkeypatch):
     """The committed default is Ollama's documented port, not this machine's.
 

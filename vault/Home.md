@@ -61,8 +61,8 @@ The architecture should evolve rather than be designed fully in advance.
 Each version is a living note with a **Goal**, ordered **Steps** (each step carries its *why*), **Decisions**, **Tools & Alternatives**, and a version-specific **Definition of Done** — update them as work happens. Work through the steps in order; don't start the next version until the current one is stable (see Definition of Done in [[Agent Instructions]]).
 
 - [x] [[V0 - Project Foundation]] — repo, uv, folder structure, tooling, config, domain models, corpus choice.
-- [ ] [[V1 - Minimal LLM Application]] — LLM client seam, prompts, error handling, cost logging, no-RAG baseline.
-- [ ] [[V2 - Document Ingestion]] — acquire, extract, normalize (Greek Unicode), parse structure, chunk, persist.
+- [x] [[V1 - Minimal LLM Application]] — LLM client seam, prompts, error handling, cost logging, no-RAG baseline.
+- [x] [[V2 - Document Ingestion]] — acquire, extract, normalize (Greek Unicode), parse structure, chunk, persist.
 - [ ] [[V3 - First RAG System]] — pgvector via docker-compose, embeddings, semantic retrieval, grounded answers.
 - [ ] [[V4 - Question to Relevant Law]] — first eval set, Recall@K/MRR, error analysis, measured improvements.
 - [ ] [[V5 - Hybrid Retrieval]] — lexical/BM25 (Greek pitfalls), RRF fusion, reranking if justified.

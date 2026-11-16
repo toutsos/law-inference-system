@@ -1,5 +1,6 @@
 from typing import Literal
 
+from pydantic import PostgresDsn
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,3 +16,6 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "ilsp/llama-krikri-8b-instruct"
     request_timeout: float = 30
+    database_url: PostgresDsn = PostgresDsn(
+        "postgresql://greek_law:greek_law@localhost:5432/greek_law"
+    )

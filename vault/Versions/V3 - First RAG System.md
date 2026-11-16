@@ -1,6 +1,6 @@
 Part of [[Home]]. See [[Agent Instructions]] for how decisions/tools/checklist should be maintained.
 
-**Status:** Not Started. **Hand-off from [[V1 - Minimal LLM Application]] received 2026-09-07** — the corpus, the comparison set and four inherited requirements are in the Notes below. Read that before step 1.
+**Status:** In Progress — started 2026-11-16, with [[V2 - Document Ingestion]] step 10 (manual QA) deferred by the learner's decision; see that note's Technical debt. **Step 1 done 2026-11-16: `poe up` starts Postgres 18 + pgvector 0.8.7.** Next: step 2, the storage schema. **Hand-off from [[V1 - Minimal LLM Application]] received 2026-09-07** — the corpus, the comparison set and four inherited requirements are in the Notes below. Read that before step 1.
 
 ## Goal
 
@@ -10,7 +10,7 @@ The first real RAG loop: embed the V2 chunks, store them in a vector store, retr
 
 ## Steps
 
-- [ ] **1. Set up local infrastructure via `docker-compose`: Postgres + pgvector** — _Why:_ first version with a real service dependency (see Decision below and [[V0 - Project Foundation]]). Compose makes the environment start with one command (`poe up`) and be identical on any machine. Wire the connection URL through Pydantic Settings.
+- [x] **1. Set up local infrastructure via `docker-compose`: Postgres + pgvector** — _Why:_ first version with a real service dependency (see Decision below and [[V0 - Project Foundation]]). Compose makes the environment start with one command (`poe up`) and be identical on any machine. Wire the connection URL through Pydantic Settings. — _Done 2026-11-16: `compose.yaml` (one `db` service, `pgvector/pgvector:0.8.7-pg18`, named volume, healthcheck, localhost-only port), `poe up`/`down`/`psql`, `Settings.database_url: PostgresDsn`. First `poe up` pulled and reported Healthy in 34 s; `pg_available_extensions` shows `vector 0.8.7` available, not yet created (step 2 creates it). 4 tests (3 in the new `tests/test_infrastructure.py`, 1 in `tests/test_config.py`), suite 268 → 272 fast + 24 `slow`. See [[Docker Compose]]._
 - [ ] **2. Design the storage schema for chunks + embeddings + metadata** — _Why:_ schema design forces the questions that matter: what's a row (a chunk), which metadata columns will be filtered on, what the embedding dimension is (fixed by the model chosen in step 3 — note the coupling). Keep it minimal; [[V6 - Legal Structure and Citations]] will extend it.
 - [ ] **3. Choose the embedding model — compare at least two on Greek text** — _Why:_ this is the highest-leverage model decision in the project and *Greek support is not a given*. Compare a hosted multilingual model (e.g. OpenAI text-embedding-3) against an open multilingual model (e.g. BGE-M3, multilingual-e5) on a handful of Greek legal sentences before committing. Record dimensions, cost, and the sanity-check results. Capture the concept as an [[Embeddings]] note.
 - [ ] **4. Implement the load pipeline: read `data/processed/` → embed → store; make it idempotent** — _Why:_ re-running ingestion must not duplicate rows — idempotency (e.g. upsert on a stable chunk ID) is the first "pipelines re-run" lesson, cheap to learn now and painful to learn in [[V12 - Production-Oriented System]].
@@ -25,6 +25,9 @@ The first real RAG loop: embed the V2 chunks, store them in a vector store, retr
 
 - **2026-08-22:** Local infra (vector store / Postgres) runs via `docker-compose`, introduced here rather than in V0, since this is the first version that actually needs a running service (see [[V0 - Project Foundation]] Decisions).
 - **2026-08-22:** Vector store: **pgvector inside Postgres**, not a dedicated vector database (Qdrant/Weaviate/Chroma/…). One database serves vectors now *and* the structured/lexical needs of [[V5 - Hybrid Retrieval]] and [[V6 - Legal Structure and Citations]] — one service to run, one query language, and hybrid search stays in-database. A dedicated store is justified at scales/feature-needs this project won't reach; revisit only if pgvector measurably falls short.
+- **2026-11-16 (step 1): image `pgvector/pgvector:0.8.7-pg18` via `compose.yaml` (option A), pinned, named volume, port bound to 127.0.0.1.** Rejected: building pgvector on the official `postgres` image (B — re-does published work) and a Homebrew install (C — not reproducible). Details and the PG18 volume-path gotcha in [[Docker Compose]].
+- **2026-11-16 (step 1): `CREATE EXTENSION IF NOT EXISTS vector` belongs to step 2's schema SQL, not a compose init script** — the learner's choice (option 2). Init scripts run only on a fresh volume and are silently skipped afterwards; the schema SQL runs on every load and is idempotent. Compose stays pure infrastructure.
+- **2026-11-16 (step 1): `database_url` is a `PostgresDsn`, not `str`** — a malformed URL fails when `Settings` loads, not at the first query. The default carries a committed local-only password; a hosted database later gets its URL from `.env` and is the moment to consider `SecretStr`.
 
 ## Tools & Alternatives Considered
 
