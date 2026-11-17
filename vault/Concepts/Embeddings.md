@@ -33,25 +33,25 @@ Measured on the dev set `embedding-dev-v1` (17 questions, 15 from π.δ. 62/2025
 
 Rank of the first expected chunk, per question (1 = top; >5 is a Recall@5 miss):
 
-| Question | Probes | bge-m3 | qwen + instruction | qwen plain |
-| --- | --- | --- | --- | --- |
-| d01 | probation period, title wording | 1 | 2 | 2 |
-| d02 | when wages are paid | 1 | 1 | 1 |
-| d03 | «κρατήσει μέρος του μισθού» vs «συμψηφισμός» | 3 | 1 | 1 |
-| d04 | harassment, two acceptable paragraphs | 1 | 1 | 1 |
-| d05 | **no shared keyword** (working from home → τηλεργασία) | **1** | **107** | **81** |
-| d06 | right paragraph among 11 (camera) | 1 | 1 | 1 |
-| d07 | «10 το βράδυ» vs «22:00» | 1 | 7 | 8 |
-| d08 | legal vs illegal overtime | 2 | 1 | 1 |
-| d09 | Sunday pay vs Sunday-rest articles | 1 | 1 | 8 |
-| d10 | paternity leave paraphrase | 1 | 1 | 1 |
-| d11 | maternity leave vs άρθρο 291 | 1 | 1 | 1 |
-| d12 | «παντρευτώ» vs «τέλεση γάμου» | 1 | 9 | 7 |
-| d13 | answer split over two articles | 1 | 1 | 1 |
-| d14 | oversized chunk with a flattened table | 1 | 3 | 2 |
-| d15 | «απόλυση» vs «καταγγελία» | 1 | 5 | 4 |
-| d16 | the other act, everyday wording | 1 | 1 | 1 |
-| d17 | amending article (meaning in the title) | 2 | 1 | 1 |
+| Question | Probes                                                 | bge-m3 | qwen + instruction | qwen plain |
+| -------- | ------------------------------------------------------ | ------ | ------------------ | ---------- |
+| d01      | probation period, title wording                        | 1      | 2                  | 2          |
+| d02      | when wages are paid                                    | 1      | 1                  | 1          |
+| d03      | «κρατήσει μέρος του μισθού» vs «συμψηφισμός»           | 3      | 1                  | 1          |
+| d04      | harassment, two acceptable paragraphs                  | 1      | 1                  | 1          |
+| d05      | **no shared keyword** (working from home → τηλεργασία) | **1**  | **107**            | **81**     |
+| d06      | right paragraph among 11 (camera)                      | 1      | 1                  | 1          |
+| d07      | «10 το βράδυ» vs «22:00»                               | 1      | 7                  | 8          |
+| d08      | legal vs illegal overtime                              | 2      | 1                  | 1          |
+| d09      | Sunday pay vs Sunday-rest articles                     | 1      | 1                  | 8          |
+| d10      | paternity leave paraphrase                             | 1      | 1                  | 1          |
+| d11      | maternity leave vs άρθρο 291                           | 1      | 1                  | 1          |
+| d12      | «παντρευτώ» vs «τέλεση γάμου»                          | 1      | 9                  | 7          |
+| d13      | answer split over two articles                         | 1      | 1                  | 1          |
+| d14      | oversized chunk with a flattened table                 | 1      | 3                  | 2          |
+| d15      | «απόλυση» vs «καταγγελία»                              | 1      | 5                  | 4          |
+| d16      | the other act, everyday wording                        | 1      | 1                  | 1          |
+| d17      | amending article (meaning in the title)                | 2      | 1                  | 1          |
 
 - **bge-m3 found every answer in the top 5, 14 of 17 at rank 1.** Its three non-first ranks lost to genuine near-competitors: d08 ranked illegal overtime (παρ. 5) above legal (παρ. 3) — the exact distinction that question probes; d03 ranked άρθρα 9–10 (other wage provisions) first; d17 ranked άρθρο 58 παρ. 5.
 - **Qwen failed hardest on the question built to need meaning alone:** d05 (no shared keyword) at rank 107; bge-m3 rank 1. Qwen also missed d07 («10 το βράδυ» vs «22:00»), d12 («παντρευτώ» vs «τέλεση γάμου») and d15 («απόλυση» vs «καταγγελία») — every miss a paraphrase.
