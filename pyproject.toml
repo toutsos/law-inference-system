@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.28.1",
+    "pgvector>=0.5.1",
     "psycopg[binary]>=3.3.9",
     "pydantic>=2.13.4",
     "pydantic-settings>=2.15.0",
@@ -68,6 +69,7 @@ up = "docker compose up --detach --wait"
 down = "docker compose down"
 psql = "docker compose exec db psql -U greek_law -d greek_law"
 schema = "python -m greek_law.storage.schema"
+load = "python -m greek_law.storage.load"
 
 
 [tool.poe.tasks.typecheck]

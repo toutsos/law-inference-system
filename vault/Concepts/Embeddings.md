@@ -75,4 +75,5 @@ Rank of the first expected chunk, per question (1 = top; >5 is a Recall@5 miss):
 
 - **Ollama truncates silently unless told not to.** Send `"truncate": false` and an explicit `num_ctx` (8 192 for bge-m3) on every `/api/embed` call, or a long chunk's tail is dropped and nothing reports it. The comparison script's first run is how this was caught.
 - **Normalize before comparing.** Models do not promise unit-length output; a raw dot product ranks by vector length.
+- **Batch the requests.** `/api/embed` takes a list of inputs. The full corpus took 252 s one request per chunk (step 3) and 78.9 s in batches of 16 (V3 step 4).
 - **One model per vector column.** Vectors from two models live in unrelated spaces; comparing them is meaningless and raises no error. Hence `embedding_model` on every row.

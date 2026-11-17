@@ -10,11 +10,20 @@ a parameter, which is why the whole system is testable without a network.
 """
 
 from greek_law.config import Settings
+from greek_law.embedding import Embedder, OllamaEmbedder
 from greek_law.llm.client import LLMClient
 from greek_law.llm.ollama_client import OllamaClient
 from greek_law.llm.retrying_client import RetryingLLMClient
+from greek_law.storage.schema import EMBEDDING_DIMENSIONS
 
 MAX_ATTEMPTS = 3
+
+EMBEDDING_MODEL = "bge-m3"
+"""Chosen in V3 step 3. A constant, not a setting: changing it also means
+changing ``vector(n)`` in schema.sql and re-embedding the corpus."""
+
+EMBEDDING_NUM_CTX = 8192
+"""bge-m3's full context. Sent explicitly so Ollama never truncates a chunk."""
 
 
 def build_client(settings: Settings) -> LLMClient:
@@ -27,4 +36,15 @@ def build_client(settings: Settings) -> LLMClient:
         ),
         max_attempts=MAX_ATTEMPTS,
         budget_seconds=settings.request_timeout * MAX_ATTEMPTS + 5.0,
+    )
+
+
+def build_embedder(settings: Settings) -> Embedder:
+    """bge-m3 through Ollama, sized to the schema's vector column."""
+    return OllamaEmbedder(
+        base_url=settings.ollama_base_url,
+        model=EMBEDDING_MODEL,
+        num_ctx=EMBEDDING_NUM_CTX,
+        dimensions=EMBEDDING_DIMENSIONS,
+        timeout=settings.request_timeout,
     )
