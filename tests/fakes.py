@@ -1,4 +1,6 @@
+from greek_law.embedding import EmbeddingUnavailableError
 from greek_law.llm.models import ChatResponse, Message
+from greek_law.storage.schema import EMBEDDING_DIMENSIONS
 
 
 class FakeLLMClient:
@@ -49,3 +51,26 @@ class RecordingSleep:
 
     def __call__(self, seconds: float) -> None:
         self.delays.append(seconds)
+
+
+class FakeEmbedder:
+    """Returns one fixed-size vector per text and records every call.
+
+    ``fail_on_call`` makes the n-th call (1-based) raise, the way Ollama
+    going away mid-load would.
+    """
+
+    def __init__(self, model: str = "bge-m3", fail_on_call: int | None = None):
+        self.model = model
+        self.calls: list[list[str]] = []
+        self._fail_on_call = fail_on_call
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        self.calls.append(texts)
+        if len(self.calls) == self._fail_on_call:
+            raise EmbeddingUnavailableError("Ollama went away")
+        return [[0.5] * EMBEDDING_DIMENSIONS for _ in texts]
+
+    @property
+    def embedded(self) -> int:
+        return sum(len(texts) for texts in self.calls)

@@ -1,23 +1,26 @@
 """V3 step 2's schema against the real Postgres from ``poe up``.
 
 Marked ``db``: these need the compose database running, so ``poe test`` skips
-them and ``poe test-all`` runs them. Each test works inside one transaction
-that is rolled back at the end, so the dev database is left exactly as it was
-— the table is created, used and discarded within the test.
+them and ``poe test-all`` runs them. Each test gets its own throwaway Postgres
+schema (``isolated_conn`` in ``conftest.py``), so the table is created, used
+and dropped without touching the dev database's ``chunks``.
+
+Until 2026-11-18 these tests used a rolled-back transaction on the dev
+database's own ``chunks`` table. That isolated their *writes* but not their
+*reads*: once step 4's ``poe load`` filled the real table, the first insert
+collided with the real ``π.δ.62/2025/άρθρο-1`` and five tests failed.
 
 What is pinned is the schema's contract with :class:`Chunk`: the filter columns
 Postgres derives from the JSON, the round trip back to the model, and the
 loud failures the step 2 decisions rely on.
 """
 
-from collections.abc import Iterator
 from typing import Any
 
 import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
-from greek_law.config import Settings
 from greek_law.domain import ActIdentity, RatifiedInstrument, SourceReference
 from greek_law.ingestion.chunking import Chunk
 from greek_law.storage.schema import EMBEDDING_DIMENSIONS, apply_schema
@@ -71,11 +74,10 @@ def _insert(conn: psycopg.Connection[Any], chunk: Chunk) -> None:
 
 
 @pytest.fixture
-def conn() -> Iterator[psycopg.Connection[Any]]:
-    with psycopg.connect(str(Settings().database_url)) as connection:
-        apply_schema(connection)
-        yield connection
-        connection.rollback()
+def conn(isolated_conn: psycopg.Connection[Any]) -> psycopg.Connection[Any]:
+    """An isolated connection with the schema applied, as step 4 will find it."""
+    apply_schema(isolated_conn)
+    return isolated_conn
 
 
 def test_applying_the_schema_twice_is_harmless(conn: psycopg.Connection[Any]) -> None:

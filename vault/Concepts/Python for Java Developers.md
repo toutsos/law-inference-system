@@ -20,7 +20,7 @@ language gave you for free.
 | static utility class | a module of plain functions |
 | implicit `this` | **explicit `self`, the first parameter** |
 | `class` = declaration, compiled | `class` = **statement, executed at runtime** |
-| `interface` | `typing.Protocol` / `abc.ABC` |
+| `interface` | `typing.Protocol` / `abc.ABC` (structural — see "`Protocol` has no `implements`" below) |
 
 ## `self` is a real parameter
 
@@ -198,6 +198,29 @@ _Added 2026-11-10 (V2, de-hyphenation)._ `unicodedata.normalize("NFD", w)` is `N
 ## `tmp_path` is `@TempDir`; `splitlines()` is not `split("\n")`
 
 _Added 2026-11-10 (V2 step 8)._ pytest's `tmp_path` fixture is JUnit 5's `@TempDir`: a fresh directory per test, injected by parameter name instead of annotation. And a trap with no Java twin: `str.splitlines()` splits on far more than `\n` — also `\r`, U+2028, U+2029, U+0085, `\x0b`, `\x0c`, `\x1c`–`\x1e`. Java's `String.lines()` splits only on `\n`, `\r` and `\r\n`. For a line-delimited *format* (JSON Lines), split on `"\n"` explicitly; `splitlines()` is for human text.
+
+## `Protocol` has no `implements` — the check happens where the class is *used*
+
+_Added 2026-11-18 (V3 step 5)._ Java's typing is **nominal**: `class PgVectorRetriever implements Retriever` *is* the relationship, and without it matching methods count for nothing. A `typing.Protocol` is **structural**: `PgVectorRetriever` never names `Retriever`, it qualifies by having a `retrieve` method of the right shape.
+
+So the check cannot happen at the class — it happens **wherever an instance is used as the protocol**: a return annotated `-> Retriever`, a parameter typed `Retriever`, an assignment. In this project that is `compositions.build_retriever`. Renaming `retrieve` to `find` makes mypy report:
+
+```
+src/greek_law/compositions.py:60: error: Incompatible return value type
+    (got "PgVectorRetriever", expected "Retriever")  [return-value]
+```
+
+— at the *promise* in `compositions.py`, not in the class. To see it yourself: break a signature, run `poe typecheck`, read where it complains.
+
+Three consequences:
+
+- **mypy checks it; Python never does.** At runtime nothing compares shapes; a wrong one surfaces as an `AttributeError` at the first call. `poe lint` is what plays `javac` here.
+- **Fakes cost nothing.** `FakeLLMClient`, `FakeEmbedder`, `AngleEmbedder` satisfy their protocols without importing or inheriting from them.
+- **The Java form is available:** `class PgVectorRetriever(Retriever):` explicitly subclasses the protocol, and mypy then checks the class at its definition. The project's convention is *not* to — `OllamaClient`, `RetryingLLMClient`, `OllamaEmbedder`, `PgVectorRetriever` all rely on structure — so an implementation never imports the contract it fulfils. Legitimate to change, but change it everywhere.
+
+## `[x] = f()` is a length-checked unpacking
+
+_Added 2026-11-18 (V3 step 5)._ `[vector] = embedder.embed([question])` is Java's `List<..> r = f(); if (r.size() != 1) throw …; var vector = r.get(0);` in one line: unpacking into a one-element target raises `ValueError` if the list has zero or two items. It states the expectation *and* enforces it, where `f()[0]` would silently take the first of two. Same mechanism as `a, b = pair`.
 
 ## Notes
 

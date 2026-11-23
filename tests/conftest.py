@@ -5,7 +5,15 @@ under this directory, no import needed. Its nearest Java relative is a JUnit 5
 extension registered for the whole suite.
 """
 
+from collections.abc import Iterator
+from typing import Any
+from uuid import uuid4
+
+import psycopg
 import pytest
+from psycopg import sql
+
+from greek_law.config import Settings
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -27,3 +35,26 @@ def update_golden(request: pytest.FixtureRequest) -> bool:
     history — never a setting left on.
     """
     return bool(request.config.getoption("--update-golden"))
+
+
+@pytest.fixture
+def isolated_conn() -> Iterator[psycopg.Connection[Any]]:
+    """A connection whose ``search_path`` is a fresh, throwaway Postgres schema.
+
+    For tests of code that commits (``load``), where a rolled-back transaction
+    cannot isolate anything. Every table created through this connection lands
+    in a schema named ``test_…`` that is dropped afterwards, so the dev
+    database's own ``chunks`` table is never read or written. ``public`` stays
+    on the path only so the ``vector`` type resolves.
+    """
+    schema = sql.Identifier(f"test_{uuid4().hex[:12]}")
+    with psycopg.connect(str(Settings().database_url)) as connection:
+        connection.execute(sql.SQL("CREATE SCHEMA {}").format(schema))
+        connection.execute(sql.SQL("SET search_path TO {}, public").format(schema))
+        connection.commit()
+        try:
+            yield connection
+        finally:
+            connection.rollback()
+            connection.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(schema))
+            connection.commit()

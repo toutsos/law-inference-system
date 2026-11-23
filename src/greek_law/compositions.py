@@ -9,11 +9,16 @@ Nothing below this module constructs a collaborator; everything receives one as
 a parameter, which is why the whole system is testable without a network.
 """
 
+from typing import Any
+
+import psycopg
+
 from greek_law.config import Settings
 from greek_law.embedding import Embedder, OllamaEmbedder
 from greek_law.llm.client import LLMClient
 from greek_law.llm.ollama_client import OllamaClient
 from greek_law.llm.retrying_client import RetryingLLMClient
+from greek_law.retrieval import PgVectorRetriever, Retriever
 from greek_law.storage.schema import EMBEDDING_DIMENSIONS
 
 MAX_ATTEMPTS = 3
@@ -48,3 +53,8 @@ def build_embedder(settings: Settings) -> Embedder:
         dimensions=EMBEDDING_DIMENSIONS,
         timeout=settings.request_timeout,
     )
+
+
+def build_retriever(settings: Settings, conn: psycopg.Connection[Any]) -> Retriever:
+    """Exact cosine search in pgvector, the question embedded like the chunks."""
+    return PgVectorRetriever(conn, build_embedder(settings))

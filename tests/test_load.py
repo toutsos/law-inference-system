@@ -4,20 +4,17 @@ The first four tests need nothing. The rest are marked ``db`` and run against
 the compose Postgres, with a fake embedder so no model is needed. ``load``
 commits per batch by the step 4 decision, so a rolled-back transaction cannot
 isolate these tests as it does step 2's: each test gets a fresh Postgres
-*schema* (a namespace inside the database) that is dropped afterwards. The
-dev database's own ``chunks`` table is never touched.
+*schema* (a namespace inside the database) that is dropped afterwards — the
+``isolated_conn`` fixture in ``conftest.py``. The dev database's own
+``chunks`` table is never touched.
 """
 
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 import psycopg
 import pytest
-from psycopg import sql
 
-from greek_law.config import Settings
 from greek_law.domain import ActIdentity, SourceReference, StructuralUnit
 from greek_law.embedding import EmbeddingUnavailableError
 from greek_law.ingestion.chunking import Chunk
@@ -28,6 +25,7 @@ from greek_law.storage.load import (
     text_hash,
 )
 from greek_law.storage.schema import EMBEDDING_DIMENSIONS
+from tests.fakes import FakeEmbedder
 
 _PD = ActIdentity(act_type="π.δ.", number="62", year=2025)
 _LAW = ActIdentity(act_type="ν.", number="5110", year=2024)
@@ -46,29 +44,6 @@ def _chunk(
         article_title=title,
         text=text,
     )
-
-
-class FakeEmbedder:
-    """Returns one fixed-size vector per text and records every call.
-
-    ``fail_on_call`` makes the n-th call (1-based) raise, the way Ollama
-    going away mid-load would.
-    """
-
-    def __init__(self, model: str = "bge-m3", fail_on_call: int | None = None):
-        self.model = model
-        self.calls: list[list[str]] = []
-        self._fail_on_call = fail_on_call
-
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        self.calls.append(texts)
-        if len(self.calls) == self._fail_on_call:
-            raise EmbeddingUnavailableError("Ollama went away")
-        return [[0.5] * EMBEDDING_DIMENSIONS for _ in texts]
-
-    @property
-    def embedded(self) -> int:
-        return sum(len(texts) for texts in self.calls)
 
 
 # --- no database ---------------------------------------------------------------
@@ -121,28 +96,13 @@ def test_the_hash_covers_the_header_not_only_the_text() -> None:
 # --- with the compose Postgres ---------------------------------------------------
 
 
-@pytest.fixture
-def conn() -> Iterator[psycopg.Connection[Any]]:
-    schema = sql.Identifier(f"test_load_{uuid4().hex[:12]}")
-    with psycopg.connect(str(Settings().database_url)) as connection:
-        connection.execute(sql.SQL("CREATE SCHEMA {}").format(schema))
-        connection.execute(sql.SQL("SET search_path TO {}, public").format(schema))
-        connection.commit()
-        try:
-            yield connection
-        finally:
-            connection.rollback()
-            connection.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(schema))
-            connection.commit()
-
-
-def _keys(conn: psycopg.Connection[Any]) -> set[str]:
-    return {key for (key,) in conn.execute("SELECT key FROM chunks")}
+def _keys(isolated_conn: psycopg.Connection[Any]) -> set[str]:
+    return {key for (key,) in isolated_conn.execute("SELECT key FROM chunks")}
 
 
 @pytest.mark.db
 def test_a_second_load_embeds_nothing_and_changes_nothing(
-    conn: psycopg.Connection[Any],
+    isolated_conn: psycopg.Connection[Any],
 ) -> None:
     """Load twice: same rows, and the second run makes no embedding call.
 
@@ -153,29 +113,31 @@ def test_a_second_load_embeds_nothing_and_changes_nothing(
     chunks = [_chunk(str(n)) for n in range(1, 6)]
     first, second = FakeEmbedder(), FakeEmbedder()
 
-    load(conn, chunks, first, batch_size=2)
-    report = load(conn, chunks, second, batch_size=2)
+    load(isolated_conn, chunks, first, batch_size=2)
+    report = load(isolated_conn, chunks, second, batch_size=2)
 
     assert first.embedded == 5
     assert second.calls == []
     assert report.unchanged == 5
-    assert _keys(conn) == {chunk.key for chunk in chunks}
+    assert _keys(isolated_conn) == {chunk.key for chunk in chunks}
 
 
 @pytest.mark.db
-def test_only_a_changed_chunk_is_re_embedded(conn: psycopg.Connection[Any]) -> None:
+def test_only_a_changed_chunk_is_re_embedded(
+    isolated_conn: psycopg.Connection[Any],
+) -> None:
     """After one paragraph's text changes, only that paragraph is sent."""
-    load(conn, [_chunk("1"), _chunk("2")], FakeEmbedder())
+    load(isolated_conn, [_chunk("1"), _chunk("2")], FakeEmbedder())
     embedder = FakeEmbedder()
 
-    load(conn, [_chunk("1"), _chunk("2", text="Νέο κείμενο.")], embedder)
+    load(isolated_conn, [_chunk("1"), _chunk("2", text="Νέο κείμενο.")], embedder)
 
     assert embedder.calls == [[_chunk("2", text="Νέο κείμενο.").embedding_text]]
 
 
 @pytest.mark.db
 def test_a_metadata_change_rewrites_the_json_without_re_embedding(
-    conn: psycopg.Connection[Any],
+    isolated_conn: psycopg.Connection[Any],
 ) -> None:
     """A changed ``path`` reaches the stored chunk; the vector is kept.
 
@@ -184,15 +146,15 @@ def test_a_metadata_change_rewrites_the_json_without_re_embedding(
     ΜΕΡΟΣ title with V2's kerning split still in it — in the table forever.
     """
     original = _chunk("1")
-    load(conn, [original], FakeEmbedder())
+    load(isolated_conn, [original], FakeEmbedder())
     moved = original.model_copy(
         update={"path": [StructuralUnit(kind="ΜΕΡΟΣ", number="Α’", title="ΕΡΓΑΣΙΑ")]}
     )
     embedder = FakeEmbedder()
 
-    report = load(conn, [moved], embedder)
+    report = load(isolated_conn, [moved], embedder)
 
-    stored = conn.execute("SELECT chunk FROM chunks").fetchone()
+    stored = isolated_conn.execute("SELECT chunk FROM chunks").fetchone()
     assert stored is not None
     assert Chunk.model_validate(stored[0]) == moved
     assert embedder.calls == []
@@ -201,7 +163,7 @@ def test_a_metadata_change_rewrites_the_json_without_re_embedding(
 
 @pytest.mark.db
 def test_pruning_deletes_only_inside_the_loaded_documents(
-    conn: psycopg.Connection[Any],
+    isolated_conn: psycopg.Connection[Any],
 ) -> None:
     """A key gone from one act is deleted; the other act's rows are untouched.
 
@@ -211,17 +173,17 @@ def test_pruning_deletes_only_inside_the_loaded_documents(
     """
     law = [_chunk("1", act=_LAW), _chunk("2", act=_LAW)]
     decree = [_chunk("1"), _chunk("2"), _chunk("3")]
-    load(conn, law + decree, FakeEmbedder())
+    load(isolated_conn, law + decree, FakeEmbedder())
 
-    report = load(conn, decree[:2], FakeEmbedder())
+    report = load(isolated_conn, decree[:2], FakeEmbedder())
 
     assert report.deleted == 1
-    assert _keys(conn) == {chunk.key for chunk in law + decree[:2]}
+    assert _keys(isolated_conn) == {chunk.key for chunk in law + decree[:2]}
 
 
 @pytest.mark.db
 def test_a_failed_load_keeps_finished_batches_and_deletes_nothing(
-    conn: psycopg.Connection[Any],
+    isolated_conn: psycopg.Connection[Any],
 ) -> None:
     """Embedding fails on batch 2: batch 1 stays, nothing is pruned, re-run resumes.
 
@@ -230,25 +192,25 @@ def test_a_failed_load_keeps_finished_batches_and_deletes_nothing(
     all batches succeed could delete on the evidence of half a corpus.
     """
     stale = _chunk("99")
-    load(conn, [stale], FakeEmbedder())
+    load(isolated_conn, [stale], FakeEmbedder())
     chunks = [_chunk(str(n)) for n in range(1, 5)]
 
     with pytest.raises(EmbeddingUnavailableError):
-        load(conn, chunks, FakeEmbedder(fail_on_call=2), batch_size=2)
-    conn.rollback()
+        load(isolated_conn, chunks, FakeEmbedder(fail_on_call=2), batch_size=2)
+    isolated_conn.rollback()
 
-    assert _keys(conn) == {stale.key, chunks[0].key, chunks[1].key}
+    assert _keys(isolated_conn) == {stale.key, chunks[0].key, chunks[1].key}
 
     resumed = FakeEmbedder()
-    load(conn, chunks, resumed, batch_size=2)
+    load(isolated_conn, chunks, resumed, batch_size=2)
 
     assert resumed.calls == [[chunks[2].embedding_text, chunks[3].embedding_text]]
-    assert _keys(conn) == {chunk.key for chunk in chunks}
+    assert _keys(isolated_conn) == {chunk.key for chunk in chunks}
 
 
 @pytest.mark.db
 def test_a_different_model_re_embeds_everything(
-    conn: psycopg.Connection[Any],
+    isolated_conn: psycopg.Connection[Any],
 ) -> None:
     """Rows embedded by another model are not "unchanged", whatever their hash.
 
@@ -257,19 +219,22 @@ def test_a_different_model_re_embeds_everything(
     search would compare the question against them — meaningless, no error.
     """
     chunks = [_chunk("1"), _chunk("2")]
-    load(conn, chunks, FakeEmbedder(model="bge-m3"))
+    load(isolated_conn, chunks, FakeEmbedder(model="bge-m3"))
     other = FakeEmbedder(model="other-model")
 
-    load(conn, chunks, other)
+    load(isolated_conn, chunks, other)
 
     assert other.embedded == 2
-    models = {model for (model,) in conn.execute("SELECT embedding_model FROM chunks")}
+    models = {
+        model
+        for (model,) in isolated_conn.execute("SELECT embedding_model FROM chunks")
+    }
     assert models == {"other-model"}
 
 
 @pytest.mark.db
 def test_the_stored_vector_is_the_one_the_embedder_returned(
-    conn: psycopg.Connection[Any],
+    isolated_conn: psycopg.Connection[Any],
 ) -> None:
     """A vector round-trips through pgvector unchanged, and next to its own key.
 
@@ -283,10 +248,10 @@ def test_the_stored_vector_is_the_one_the_embedder_returned(
             return [[float(len(t))] * EMBEDDING_DIMENSIONS for t in texts]
 
     chunks = [_chunk("1", text="α"), _chunk("2", text="ββββ")]
-    load(conn, chunks, Distinct(), batch_size=2)
+    load(isolated_conn, chunks, Distinct(), batch_size=2)
 
     for chunk in chunks:
-        row = conn.execute(
+        row = isolated_conn.execute(
             "SELECT embedding FROM chunks WHERE key = %s", (chunk.key,)
         ).fetchone()
         assert row is not None
