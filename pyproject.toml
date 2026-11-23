@@ -71,6 +71,7 @@ psql = "docker compose exec db psql -U greek_law -d greek_law"
 schema = "python -m greek_law.storage.schema"
 load = "python -m greek_law.storage.load"
 search = "python -m greek_law.retrieval.search"
+inspect = "python -m experiments.retrieval_inspection.run"
 
 
 [tool.poe.tasks.typecheck]
