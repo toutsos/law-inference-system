@@ -27,6 +27,11 @@ EMBEDDING_MODEL = "bge-m3"
 """Chosen in V3 step 3. A constant, not a setting: changing it also means
 changing ``vector(n)`` in schema.sql and re-embedding the corpus."""
 
+LLM_NUM_CTX = 8192
+"""The chat model's context window, in tokens. Chosen in V3 step 7: prompts need
+at most ~7 500 (top-5 provisions + rules + question + answer). Without it,
+krikri's Modelfile loads 131 072 — 31 GB measured with ``ollama ps``."""
+
 EMBEDDING_NUM_CTX = 8192
 """bge-m3's full context. Sent explicitly so Ollama never truncates a chunk."""
 
@@ -37,6 +42,7 @@ def build_client(settings: Settings) -> LLMClient:
         OllamaClient(
             base_url=settings.ollama_base_url,
             model=settings.ollama_model,
+            num_ctx=LLM_NUM_CTX,
             timeout=settings.request_timeout,
         ),
         max_attempts=MAX_ATTEMPTS,

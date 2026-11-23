@@ -62,6 +62,7 @@ def _client_with(handler: Callable[[httpx.Request], httpx.Response]) -> OllamaCl
     return OllamaClient(
         base_url="http://ollama.test",
         model="test-model",
+        num_ctx=4096,
         timeout=1.0,
         http_client=httpx.Client(
             base_url="http://ollama.test",
@@ -174,6 +175,26 @@ def test_request_carries_roles_and_disables_streaming() -> None:
         {"role": "system", "content": "You are terse."},
         {"role": "user", "content": "Γεια"},
     ]
+
+
+def test_request_pins_the_context_window_in_options() -> None:
+    """The outbound body carries ``options.num_ctx`` with the value we chose.
+
+    Without it Ollama uses the model's Modelfile value — 131 072 for krikri,
+    measured with ``ollama ps`` at 31 GB loaded to serve prompts of at most
+    ~7 500 tokens. Catches the option being dropped or misnamed (Ollama ignores
+    unknown keys silently): answers would still arrive, and only the memory
+    footprint — or, for a model with a small default, a silently truncated
+    prompt — would show it. 4096 is used, not 8192, so the test proves the
+    value is passed through rather than hard-coded in the client.
+    """
+    captured: list[httpx.Request] = []
+    client = _client_returning(_BODY, captured=captured)
+
+    client.chat(_one_message())
+
+    sent = json.loads(captured[0].content)
+    assert sent["options"] == {"num_ctx": 4096}
 
 
 def test_no_httpx_exception_escapes_the_seam() -> None:

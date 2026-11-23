@@ -1,5 +1,6 @@
 from greek_law.embedding import EmbeddingUnavailableError
 from greek_law.llm.models import ChatResponse, Message
+from greek_law.retrieval import DEFAULT_K, RetrievedChunk
 from greek_law.storage.schema import EMBEDDING_DIMENSIONS
 
 
@@ -74,3 +75,26 @@ class FakeEmbedder:
     @property
     def embedded(self) -> int:
         return sum(len(texts) for texts in self.calls)
+
+
+class FakeRetriever:
+    """A canned Retriever: fixed hits (or a fixed error), every call recorded.
+
+    Lets the service and the CLI be tested without Postgres or Ollama — the
+    reason the Retriever protocol exists (V3 step 5).
+    """
+
+    def __init__(
+        self,
+        hits: list[RetrievedChunk] | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self._hits = hits or []
+        self._error = error
+        self.calls: list[tuple[str, int]] = []
+
+    def retrieve(self, question: str, k: int = DEFAULT_K) -> list[RetrievedChunk]:
+        self.calls.append((question, k))
+        if self._error is not None:
+            raise self._error
+        return self._hits

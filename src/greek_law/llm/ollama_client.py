@@ -33,10 +33,12 @@ class OllamaClient:
         self,
         base_url: str,
         model: str,
+        num_ctx: int,
         timeout: float,
         http_client: httpx.Client | None = None,
     ) -> None:
         self._model = model
+        self._num_ctx = num_ctx
         self._http = http_client or httpx.Client(base_url=base_url, timeout=timeout)
 
     def chat(self, messages: list[Message]) -> ChatResponse:
@@ -48,6 +50,7 @@ class OllamaClient:
                     "model": self._model,
                     "stream": False,
                     "messages": [message.model_dump() for message in messages],
+                    "options": {"num_ctx": self._num_ctx},
                 },
             )
             response.raise_for_status()

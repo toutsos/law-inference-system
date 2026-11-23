@@ -1,4 +1,4 @@
-from greek_law.compositions import build_client
+from greek_law.compositions import LLM_NUM_CTX, build_client
 from greek_law.config import Settings
 from greek_law.llm.ollama_client import OllamaClient
 from greek_law.llm.retrying_client import RetryingLLMClient
@@ -36,3 +36,19 @@ def test_the_retry_budget_leaves_room_for_every_attempt() -> None:
 
     assert isinstance(client, RetryingLLMClient)
     assert client._budget_seconds >= settings.request_timeout * client._max_attempts
+
+
+def test_the_llm_context_window_is_ours_not_the_modelfiles() -> None:
+    """build_client hands OllamaClient the project's LLM_NUM_CTX.
+
+    The client can only send what the composition root gives it. Catches the
+    wiring falling back to a test value or being dropped in a refactor of
+    build_client — the window would revert to whatever the model's publisher
+    put in its Modelfile (131 072 for krikri, 31 GB), and switching models
+    would change it with no diff in this repository.
+    """
+    client = build_client(Settings())
+
+    assert isinstance(client, RetryingLLMClient)
+    assert isinstance(client._inner, OllamaClient)
+    assert client._inner._num_ctx == LLM_NUM_CTX

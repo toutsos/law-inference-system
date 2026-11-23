@@ -10,11 +10,15 @@ import argparse
 import logging
 import sys
 
-from greek_law.application import Answer, Question, answer_question
-from greek_law.compositions import build_client
+import psycopg
+
+from greek_law.application import Answer, Question, answer_with_retrieval
+from greek_law.compositions import build_client, build_retriever
 from greek_law.config import Settings
+from greek_law.embedding import EmbeddingError
 from greek_law.llm.client import LLMClient
 from greek_law.llm.errors import LLMError
+from greek_law.retrieval import NoEmbeddingsError, Retriever
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +44,7 @@ def _log_usage(answer: Answer) -> None:
     Local inference has no price per token, so the units are tokens, seconds
     and tokens/second — the decision recorded on 2026-08-29.
     """
+
     usage = answer.metadata
     rate = usage.tokens_out / usage.duration_seconds if usage.duration_seconds else 0.0
     logger.info(
@@ -57,11 +62,11 @@ def _log_usage(answer: Answer) -> None:
         logger.warning("The answer was cut off at the token limit; it is incomplete.")
 
 
-def run(question: str, client: LLMClient) -> int:
+def run(question: str, retriever: Retriever, client: LLMClient) -> int:
     """Answer one question and report it. Returns a process exit code."""
     try:
-        answer = answer_question(Question(text=question), client)
-    except LLMError as error:
+        answer = answer_with_retrieval(Question(text=question), retriever, client)
+    except (EmbeddingError, NoEmbeddingsError, LLMError) as error:
         logger.error("%s: %s", type(error).__name__, error)
         return 1
 
@@ -80,4 +85,10 @@ def main(argv: list[str] | None = None) -> int:
 
     settings = Settings()
     _configure_logging(settings)
-    return run(args.question, build_client(settings))
+    try:
+        with psycopg.connect(str(settings.database_url)) as conn:
+            retriever = build_retriever(settings, conn)
+            return run(args.question, retriever, build_client(settings))
+    except psycopg.OperationalError as error:
+        logger.error("Cannot reach the database (is `poe up` running?): %s", error)
+        return 1

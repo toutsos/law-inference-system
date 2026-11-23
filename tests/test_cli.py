@@ -2,12 +2,17 @@ import logging
 
 import pytest
 
+from greek_law import cli
 from greek_law.cli import _configure_logging, run
 from greek_law.config import Settings
+from greek_law.domain import ActIdentity, SourceReference
+from greek_law.embedding import EmbeddingUnavailableError
+from greek_law.ingestion.chunking import Chunk
 from greek_law.llm.errors import LLMTimeoutError, LLMUnavailableError
 from greek_law.llm.models import ChatResponse
 from greek_law.llm.retrying_client import RetryingLLMClient
-from tests.fakes import FakeLLMClient, FlakyLLMClient
+from greek_law.retrieval import NoEmbeddingsError, RetrievedChunk
+from tests.fakes import FakeLLMClient, FakeRetriever, FlakyLLMClient
 
 _A_RESPONSE = ChatResponse(
     model="ilsp/llama-krikri-8b-instruct",
@@ -17,6 +22,24 @@ _A_RESPONSE = ChatResponse(
     tokens_out=11,
     duration_seconds=0.25,
 )
+
+
+_A_HIT = RetrievedChunk(
+    chunk=Chunk(
+        document_id="test_doc",
+        source=SourceReference(
+            act=ActIdentity(act_type="ν.", number="5110", year=2024),
+            article="11",
+            paragraph="1",
+        ),
+        text="Κείμενο.",
+    ),
+    distance=0.34,
+)
+
+
+def _retriever() -> FakeRetriever:
+    return FakeRetriever([_A_HIT])
 
 
 def _truncated() -> ChatResponse:
@@ -34,7 +57,7 @@ def test_the_answer_goes_to_stdout_and_nothing_else_does(
     and, more importantly, poisons step 10's saved baseline files with token
     counts that a future reader would mistake for part of the model's answer.
     """
-    exit_code = run("Τι ισχύει;", FakeLLMClient(_A_RESPONSE))
+    exit_code = run("Τι ισχύει;", _retriever(), FakeLLMClient(_A_RESPONSE))
 
     assert exit_code == 0
     assert capsys.readouterr().out == "Η απάντηση του μοντέλου.\n"
@@ -52,14 +75,14 @@ def test_the_usage_line_reports_tokens_duration_and_rate(
     with no error to signal the gap.
     """
     with caplog.at_level(logging.INFO, logger="greek_law.cli"):
-        run("Τι ισχύει;", FakeLLMClient(_A_RESPONSE))
+        run("Τι ισχύει;", _retriever(), FakeLLMClient(_A_RESPONSE))
 
     line = caplog.text
     assert "tokens_in=37" in line
     assert "tokens_out=11" in line
     assert "duration=0.25s" in line
     assert "rate=44.0 tok/s" in line
-    assert "prompt=v1" in line
+    assert "prompt=v2" in line
 
 
 def test_a_truncated_answer_is_reported_as_a_warning(
@@ -73,7 +96,7 @@ def test_a_truncated_answer_is_reported_as_a_warning(
     as a whole one and the baseline would understate what the model can do.
     """
     with caplog.at_level(logging.INFO, logger="greek_law.cli"):
-        run("Τι ισχύει;", FakeLLMClient(_truncated()))
+        run("Τι ισχύει;", _retriever(), FakeLLMClient(_truncated()))
 
     assert any(record.levelno == logging.WARNING for record in caplog.records)
 
@@ -88,7 +111,7 @@ def test_a_complete_answer_produces_no_warning(
     signal is then permanently lost.
     """
     with caplog.at_level(logging.INFO, logger="greek_law.cli"):
-        run("Τι ισχύει;", FakeLLMClient(_A_RESPONSE))
+        run("Τι ισχύει;", _retriever(), FakeLLMClient(_A_RESPONSE))
 
     assert not any(record.levelno >= logging.WARNING for record in caplog.records)
 
@@ -108,7 +131,7 @@ def test_a_provider_failure_exits_nonzero_without_a_traceback(
     client = FlakyLLMClient(_A_RESPONSE, failures=[LLMUnavailableError("refused")])
 
     with caplog.at_level(logging.ERROR, logger="greek_law.cli"):
-        exit_code = run("Τι ισχύει;", client)
+        exit_code = run("Τι ισχύει;", _retriever(), client)
 
     assert exit_code == 1
     assert "LLMUnavailableError" in caplog.text
@@ -128,7 +151,7 @@ def test_a_zero_duration_does_not_divide_by_zero(
     instant = _A_RESPONSE.model_copy(update={"duration_seconds": 0.0})
 
     with caplog.at_level(logging.INFO, logger="greek_law.cli"):
-        run("Τι ισχύει;", FakeLLMClient(instant))
+        run("Τι ισχύει;", _retriever(), FakeLLMClient(instant))
 
     assert "rate=0.0 tok/s" in caplog.text
 
@@ -148,7 +171,7 @@ def test_usage_is_logged_for_an_answer_that_needed_a_retry(
     client = RetryingLLMClient(inner, first_backoff_seconds=0.0, sleep=lambda _: None)
 
     with caplog.at_level(logging.INFO, logger="greek_law.cli"):
-        exit_code = run("Τι ισχύει;", client)
+        exit_code = run("Τι ισχύει;", _retriever(), client)
 
     assert exit_code == 0
     assert inner.calls == 2
@@ -178,3 +201,64 @@ def test_only_our_own_loggers_are_given_the_configured_level() -> None:
     finally:
         root.setLevel(saved[0])
         ours.setLevel(saved[1])
+
+
+def test_an_empty_store_exits_nonzero_and_says_to_run_load(
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """NoEmbeddingsError becomes exit 1 and a logged "run `poe load`", no answer.
+
+    The first `poe ask` after `docker compose down -v` hits this. Catches the
+    error escaping as a traceback (stdout empty either way, so the message is
+    what is asserted) and, worse, a CLI that catches it and prints nothing
+    actionable.
+    """
+    retriever = FakeRetriever(error=NoEmbeddingsError("no chunks; run `poe load`"))
+
+    with caplog.at_level(logging.ERROR, logger="greek_law.cli"):
+        exit_code = run("Τι ισχύει;", retriever, FakeLLMClient(_A_RESPONSE))
+
+    assert exit_code == 1
+    assert "poe load" in caplog.text
+    assert capsys.readouterr().out == ""
+
+
+def test_an_embedding_failure_exits_nonzero_without_a_traceback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An EmbeddingError (Ollama down while embedding the question) exits 1.
+
+    Since V3 the question is embedded before the LLM is called, so Ollama being
+    down now fails in the embedder, not the LLM client. Catches run() still
+    catching only LLMError — the most common local failure would then print a
+    traceback.
+    """
+    retriever = FakeRetriever(error=EmbeddingUnavailableError("refused"))
+
+    with caplog.at_level(logging.ERROR, logger="greek_law.cli"):
+        exit_code = run("Τι ισχύει;", retriever, FakeLLMClient(_A_RESPONSE))
+
+    assert exit_code == 1
+    assert "EmbeddingUnavailableError" in caplog.text
+
+
+def test_an_unreachable_database_exits_nonzero_and_says_to_start_it(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """main() reports a refused database connection with a hint, exit code 1.
+
+    `poe ask` now needs Postgres; forgetting `poe up` is the likeliest first
+    failure. Catches psycopg's OperationalError escaping as a traceback. Port 1
+    on localhost refuses immediately, so the test needs no database and no
+    network.
+    """
+    monkeypatch.setenv("DATABASE_URL", "postgresql://x:x@127.0.0.1:1/x")
+    monkeypatch.setattr(cli, "_configure_logging", lambda settings: None)
+
+    with caplog.at_level(logging.ERROR, logger="greek_law.cli"):
+        exit_code = cli.main(["Τι ισχύει;"])
+
+    assert exit_code == 1
+    assert "poe up" in caplog.text

@@ -27,7 +27,9 @@ def test_ollama_client_satisfies_the_protocol() -> None:
     drifts from the Protocol. Without a type checker this test asserts nothing,
     which is precisely why mypy was added.
     """
-    client = OllamaClient(base_url="http://ollama.test", model="m", timeout=1.0)
+    client = OllamaClient(
+        base_url="http://ollama.test", model="m", num_ctx=4096, timeout=1.0
+    )
 
     assert _requires_an_llm_client(client) is client
 
