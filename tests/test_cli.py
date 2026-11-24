@@ -299,20 +299,41 @@ def test_sources_are_listed_under_the_answer_nearest_first(
     )
 
 
-def test_a_refusal_is_printed_without_sources(
+def test_a_correct_answer_ending_in_the_refusal_sentence_keeps_its_sources(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """When the answer is "not found", only the answer is printed.
+    """An answer that answers, then appends NOT_FOUND_ANSWER, still lists sources.
 
-    Step 8 decision (learner, 2026-11-24): the provisions under a refusal are
-    by definition ones that did not answer the question, so listing them
-    reads as if the refusal were based on them. Catches the list printed
-    anyway, or an empty «Πηγές:» heading left behind.
+    Regression for step 9's q10 run 3: a correct answer citing π.δ. 62/2025
+    άρθρα 580 and 586, followed by the refusal sentence verbatim. Under step
+    8's "hide on refusal" rule the reader lost the provisions the correct
+    answer rested on. Catches the hiding rule coming back.
     """
-    refusal = _A_RESPONSE.model_copy(
-        update={"content": f"Δεν προκύπτει. {NOT_FOUND_ANSWER}"}
+    answer = _A_RESPONSE.model_copy(
+        update={"content": f"Ρυθμίζεται στο π.δ. 62/2025. {NOT_FOUND_ANSWER}"}
     )
+
+    run("Τι ισχύει;", _retriever(), FakeLLMClient(answer))
+
+    assert capsys.readouterr().out.endswith(
+        "\n\nΠηγές:\n- ν. 5110/2024, άρθρο 11 παρ. 1\n"
+    )
+
+
+def test_a_genuine_refusal_also_lists_what_was_searched(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A plain refusal prints its sources too — there is no refusal branch.
+
+    Decision 2026-11-24 (step 10, option i): the refusal signal is unreliable
+    (four shapes in step 9), so the CLI no longer reads it. For a true
+    refusal the list says "this is what was searched", which is honest.
+    Catches a refusal check re-added to _render under another name.
+    """
+    refusal = _A_RESPONSE.model_copy(update={"content": NOT_FOUND_ANSWER})
 
     run("Τι ισχύει;", _retriever(), FakeLLMClient(refusal))
 
-    assert capsys.readouterr().out == f"Δεν προκύπτει. {NOT_FOUND_ANSWER}\n"
+    assert capsys.readouterr().out == (
+        f"{NOT_FOUND_ANSWER}\n\nΠηγές:\n- ν. 5110/2024, άρθρο 11 παρ. 1\n"
+    )

@@ -16,7 +16,6 @@ from greek_law.application import (
     Answer,
     Question,
     answer_with_retrieval,
-    is_not_found,
 )
 from greek_law.compositions import build_client, build_retriever
 from greek_law.config import Settings
@@ -68,8 +67,12 @@ def _log_usage(answer: Answer) -> None:
 
 
 def _render(answer: Answer) -> str:
-    """The answer, then its sources one per line — unless it is a refusal."""
-    if not answer.sources or is_not_found(answer.text):
+    """The answer, then the provisions it was grounded on, one per line.
+
+    Shown for refusals too: the refusal sentence is not a reliable signal
+    (V3 step 9), and for a true refusal the list is what was searched.
+    """
+    if not answer.sources:
         return answer.text
     lines = [answer.text, "", "Πηγές:"]
     lines.extend(f"- {source.citation}" for source in answer.sources)
