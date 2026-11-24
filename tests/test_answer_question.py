@@ -90,3 +90,16 @@ def test_every_call_measurement_lands_on_the_matching_metadata_field() -> None:
         finish_reason="stop",
         attempts=2,
     )
+
+
+def test_a_no_retrieval_answer_has_no_sources() -> None:
+    """The V1 path returns sources == [] — nothing was shown to the model.
+
+    Catches a default that invents sources (or a shared mutable list leaking
+    between Answers): a baseline answer that listed provisions would claim a
+    grounding it never had, and step 9's V1-vs-RAG comparison would show the
+    baseline as if it had retrieval.
+    """
+    answer = answer_question(Question(text="Γεια"), FakeLLMClient(_A_RESPONSE))
+
+    assert answer.sources == []

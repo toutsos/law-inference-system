@@ -2,6 +2,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, StringConstraints
 
+from greek_law.domain import SourceReference
 from greek_law.llm.models import FinishReason
 
 QuestionText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -32,11 +33,13 @@ class AnswerMetadata(BaseModel):
 class Answer(BaseModel):
     """The application's response to a Question.
 
-    V3 adds ``sources: list[SourceReference]`` beside ``text``; V6 adds
-    structured citations. Both are additions, not changes.
+    ``sources`` are the provisions the model was shown, nearest first — not
+    the ones it chose to cite. Empty on the no-retrieval path. V6 adds
+    structured citations beside them.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     text: str
+    sources: list[SourceReference] = []
     metadata: AnswerMetadata

@@ -11,6 +11,7 @@ from greek_law.application import (
     Question,
     build_grounded_messages,
     build_messages,
+    is_not_found,
 )
 from greek_law.domain import ActIdentity, SourceReference
 from greek_law.ingestion.chunking import Chunk
@@ -207,3 +208,27 @@ def test_no_provisions_is_an_error_not_a_prompt() -> None:
     """
     with pytest.raises(ValueError):
         build_grounded_messages(Question(text="Ποιος;"), [])
+
+
+def test_a_refusal_wrapped_in_the_models_own_words_is_detected() -> None:
+    """is_not_found finds NOT_FOUND_ANSWER anywhere in the text.
+
+    Step 7's x1 answer wrote the sentence verbatim but after a sentence of its
+    own. Catches an equality check: that refusal would be read as an answer,
+    the CLI would list five irrelevant provisions under it as its "sources",
+    and step 9 would undercount refusals.
+    """
+    text = f"Η ερώτηση αφορά την κλοπή αυτοκινήτου. {NOT_FOUND_ANSWER}"
+
+    assert is_not_found(text)
+
+
+def test_an_answer_that_cites_provisions_is_not_a_refusal() -> None:
+    """A normal grounded answer is not classified as "not found".
+
+    Catches a check loose enough to match on fragments such as «διατάξεις»,
+    which nearly every answer contains: every answer would lose its sources.
+    """
+    text = "Δικαιούχος είναι ο ανάδοχος (ν. 5110/2024, άρθρο 11 παρ. 1)."
+
+    assert not is_not_found(text)

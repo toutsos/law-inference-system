@@ -3,6 +3,7 @@ import logging
 import pytest
 
 from greek_law import cli
+from greek_law.application import NOT_FOUND_ANSWER
 from greek_law.cli import _configure_logging, run
 from greek_law.config import Settings
 from greek_law.domain import ActIdentity, SourceReference
@@ -49,7 +50,7 @@ def _truncated() -> ChatResponse:
 def test_the_answer_goes_to_stdout_and_nothing_else_does(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """stdout carries the answer text alone, with no diagnostics mixed in.
+    """stdout carries the answer and its sources, with no diagnostics mixed in.
 
     stdout is the product; the usage numbers are diagnostics and belong on the
     log (stderr). Catches a debugging print() left behind, or usage printed
@@ -60,7 +61,9 @@ def test_the_answer_goes_to_stdout_and_nothing_else_does(
     exit_code = run("Τι ισχύει;", _retriever(), FakeLLMClient(_A_RESPONSE))
 
     assert exit_code == 0
-    assert capsys.readouterr().out == "Η απάντηση του μοντέλου.\n"
+    assert capsys.readouterr().out == (
+        "Η απάντηση του μοντέλου.\n\nΠηγές:\n- ν. 5110/2024, άρθρο 11 παρ. 1\n"
+    )
 
 
 def test_the_usage_line_reports_tokens_duration_and_rate(
@@ -262,3 +265,54 @@ def test_an_unreachable_database_exits_nonzero_and_says_to_start_it(
 
     assert exit_code == 1
     assert "poe up" in caplog.text
+
+
+def _hit(article: str) -> RetrievedChunk:
+    return _A_HIT.model_copy(
+        update={
+            "chunk": _A_HIT.chunk.model_copy(
+                update={
+                    "source": _A_HIT.chunk.source.model_copy(
+                        update={"article": article}
+                    )
+                }
+            )
+        }
+    )
+
+
+def test_sources_are_listed_under_the_answer_nearest_first(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """After the answer: a blank line, «Πηγές:», one citation per line, in order.
+
+    The list is how the reader checks the answer against the law. Catches
+    sources printed in a different order than retrieved (the nearest one
+    would no longer be first) or only the first one printed.
+    """
+    retriever = FakeRetriever([_hit("11"), _hit("12")])
+
+    run("Τι ισχύει;", retriever, FakeLLMClient(_A_RESPONSE))
+
+    assert capsys.readouterr().out.endswith(
+        "\n\nΠηγές:\n- ν. 5110/2024, άρθρο 11 παρ. 1\n- ν. 5110/2024, άρθρο 12 παρ. 1\n"
+    )
+
+
+def test_a_refusal_is_printed_without_sources(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """When the answer is "not found", only the answer is printed.
+
+    Step 8 decision (learner, 2026-11-24): the provisions under a refusal are
+    by definition ones that did not answer the question, so listing them
+    reads as if the refusal were based on them. Catches the list printed
+    anyway, or an empty «Πηγές:» heading left behind.
+    """
+    refusal = _A_RESPONSE.model_copy(
+        update={"content": f"Δεν προκύπτει. {NOT_FOUND_ANSWER}"}
+    )
+
+    run("Τι ισχύει;", _retriever(), FakeLLMClient(refusal))
+
+    assert capsys.readouterr().out == f"Δεν προκύπτει. {NOT_FOUND_ANSWER}\n"

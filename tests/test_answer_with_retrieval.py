@@ -2,6 +2,7 @@ import pytest
 
 from greek_law.application import (
     GROUNDED_PROMPT_VERSION,
+    NOT_FOUND_ANSWER,
     AnswerMetadata,
     Question,
     answer_with_retrieval,
@@ -111,3 +112,36 @@ def test_a_retrieval_failure_stops_before_the_llm_is_called() -> None:
         answer_with_retrieval(Question(text="Ποιος;"), retriever, llm)
 
     assert llm.calls == []
+
+
+def test_sources_are_the_retrieved_provisions_nearest_first() -> None:
+    """Answer.sources is the hits' SourceReferences, in retrieval order.
+
+    Sources mean "shown to the model" (step 8 decision A), so they come from
+    the retriever, never from the model's text. Catches the list being taken
+    from only the first hit, reordered, or rebuilt by parsing the answer —
+    which step 7 showed drops the act or the paragraph, and would make step
+    10 call a generation failure a retrieval failure.
+    """
+    answer = answer_with_retrieval(
+        Question(text="Ποιος;"), FakeRetriever(_HITS), FakeLLMClient(_A_RESPONSE)
+    )
+
+    assert answer.sources == [hit.chunk.source for hit in _HITS]
+
+
+def test_sources_are_kept_when_the_model_refuses() -> None:
+    """A refusal still carries every provision the model was shown.
+
+    Hiding sources on refusal is a display decision made in the CLI, not a
+    fact about the answer. Catches the service emptying sources on refusal:
+    step 10 could then no longer see "the right provision was retrieved and
+    the model still refused" — the clearest generation failure there is.
+    """
+    refusal = _A_RESPONSE.model_copy(update={"content": NOT_FOUND_ANSWER})
+
+    answer = answer_with_retrieval(
+        Question(text="Ποιος;"), FakeRetriever(_HITS), FakeLLMClient(refusal)
+    )
+
+    assert answer.sources == [hit.chunk.source for hit in _HITS]

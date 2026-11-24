@@ -7,6 +7,7 @@ from greek_law.application.prompts import (
     SYSTEM_PROMPT,
     build_grounded_messages,
     build_messages,
+    is_not_found,
 )
 from greek_law.application.service import answer_question, answer_with_retrieval
 
@@ -23,4 +24,5 @@ __all__ = [
     "answer_with_retrieval",
     "build_grounded_messages",
     "build_messages",
+    "is_not_found",
 ]

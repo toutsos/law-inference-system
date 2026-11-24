@@ -5,6 +5,7 @@ from greek_law.application.prompts import (
     build_grounded_messages,
     build_messages,
 )
+from greek_law.domain import SourceReference
 from greek_law.llm.client import LLMClient
 from greek_law.llm.models import ChatResponse
 from greek_law.retrieval import Retriever
@@ -13,7 +14,7 @@ from greek_law.retrieval import Retriever
 def answer_question(question: Question, client: LLMClient) -> Answer:
     """Answer a legal question with no retrieval — the V1 baseline path."""
     response = client.chat(build_messages(question))
-    return _to_answer(response, PROMPT_VERSION)
+    return _to_answer(response, PROMPT_VERSION, sources=[])
 
 
 def answer_with_retrieval(
@@ -27,13 +28,19 @@ def answer_with_retrieval(
     hits = retriever.retrieve(question.text)
     chunks = [hit.chunk for hit in hits]
     response = client.chat(build_grounded_messages(question, chunks))
-    return _to_answer(response, GROUNDED_PROMPT_VERSION)
+    sources = [chunk.source for chunk in chunks]
+    return _to_answer(response, GROUNDED_PROMPT_VERSION, sources)
 
 
-def _to_answer(response: ChatResponse, prompt_version: str) -> Answer:
-    """Wrap the model's reply and the call's usage into an Answer."""
+def _to_answer(
+    response: ChatResponse,
+    prompt_version: str,
+    sources: list[SourceReference],
+) -> Answer:
+    """Wrap the model's reply, its sources and the call's usage into an Answer."""
     return Answer(
         text=response.content,
+        sources=sources,
         metadata=AnswerMetadata(
             model=response.model,
             prompt_version=prompt_version,

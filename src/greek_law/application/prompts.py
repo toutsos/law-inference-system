@@ -47,6 +47,16 @@ GROUNDED_PROMPT_VERSION = "v2"
 NOT_FOUND_ANSWER = "Οι διατάξεις που εντοπίστηκαν δεν απαντούν στην ερώτηση."
 """The exact sentence rule 4 asks for. Steps 9–10 count refusals by it."""
 
+
+def is_not_found(text: str) -> bool:
+    """Whether an answer is the rule 4 refusal.
+
+    A substring test, not equality: the model writes the sentence verbatim but
+    may wrap it in words of its own (step 7, x1).
+    """
+    return NOT_FOUND_ANSWER in text
+
+
 GROUNDED_SYSTEM_PROMPT = f"""\
 Είσαι βοηθός νομικής πληροφόρησης για την ελληνική νομοθεσία. Μαζί με κάθε \
 ερώτηση λαμβάνεις διατάξεις νόμων. Κάθε διάταξη έχει μια γραμμή «Διάταξη:» με \

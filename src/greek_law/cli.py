@@ -12,7 +12,12 @@ import sys
 
 import psycopg
 
-from greek_law.application import Answer, Question, answer_with_retrieval
+from greek_law.application import (
+    Answer,
+    Question,
+    answer_with_retrieval,
+    is_not_found,
+)
 from greek_law.compositions import build_client, build_retriever
 from greek_law.config import Settings
 from greek_law.embedding import EmbeddingError
@@ -62,6 +67,15 @@ def _log_usage(answer: Answer) -> None:
         logger.warning("The answer was cut off at the token limit; it is incomplete.")
 
 
+def _render(answer: Answer) -> str:
+    """The answer, then its sources one per line — unless it is a refusal."""
+    if not answer.sources or is_not_found(answer.text):
+        return answer.text
+    lines = [answer.text, "", "Πηγές:"]
+    lines.extend(f"- {source.citation}" for source in answer.sources)
+    return "\n".join(lines)
+
+
 def run(question: str, retriever: Retriever, client: LLMClient) -> int:
     """Answer one question and report it. Returns a process exit code."""
     try:
@@ -71,7 +85,7 @@ def run(question: str, retriever: Retriever, client: LLMClient) -> int:
         return 1
 
     _log_usage(answer)
-    print(answer.text)
+    print(_render(answer))
     return 0
 
 
