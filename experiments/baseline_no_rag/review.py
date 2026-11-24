@@ -41,6 +41,13 @@ FLAGS = {
     "accidental_correct_token": "a correct detail inside a fabricated answer",
     "misreads_question": "misquotes the question it was given",
     "unmeasured_probe": "failed earlier than the probe could measure",
+    # Added in V3 step 9 for the RAG run.
+    "unmarked_refusal": "refused without the exact NOT_FOUND_ANSWER sentence",
+    "spurious_refusal": "the refusal sentence on an answer that does answer",
+    "term_substitution": "replaces the provision's legal term with another",
+    "dropped_condition": "drops an exception or reservation the provision makes",
+    "misattributed_act": "cites a provision under the wrong act or instrument",
+    "unsupported_detail": "states something no source says, e.g. a computed sum",
 }
 
 
@@ -58,7 +65,7 @@ def latest_run(results_dir: Path) -> Path:
     return runs[-1]
 
 
-def _quote(text: str) -> str:
+def quote(text: str) -> str:
     """Blockquote a multi-line answer so Markdown keeps it as one unit."""
     return "\n".join(f"> {line}" if line else ">" for line in text.splitlines())
 
@@ -145,8 +152,11 @@ def render(
             "",
             "**Answer.**",
             "",
-            _quote(answer.get("answer", f"[{answer.get('error', 'no answer')}]")),
+            quote(answer.get("answer", f"[{answer.get('error', 'no answer')}]")),
         ]
+        sources = answer.get("sources", [])
+        if sources:
+            lines += ["", "**Sources.** " + " · ".join(f"`{one}`" for one in sources)]
         cited = note.get("cited", [])
         if cited:
             lines += ["", "**Cited.** " + " · ".join(f"`{one}`" for one in cited)]

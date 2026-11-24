@@ -1,0 +1,67 @@
+{
+  "run": "2026-11-24T18-04-04Z",
+  "annotated_by": "tutor, 2026-11-24; reviewed by the learner the same day, accepted without changes",
+  "method": "V3 step 9. Same vocabulary as the V1 annotation (2026-09-07T16-53-31Z) plus six flags agreed for the RAG run. Each answer was compared against questions.json 'expected' and against the stored text of the provisions in its 'sources'. This run is the one scored; runs 2026-11-24T18-08-40Z and 2026-11-24T18-10-02Z (same set, same settings, temperature 0.5) were read for stability only, and what they did differently is the last sentence of each note. Retrieval is deterministic: all three runs had identical sources for every question. Whether a failure is retrieval or generation is noted where obvious; the formal sort is step 10.",
+  "annotations": {
+    "q01": {
+      "verdict": "correct",
+      "cited": ["ν. 5110/2024, άρθρο 3 παρ. 1", "ν. 5110/2024, άρθρο 3 παρ. 2"],
+      "flags": [],
+      "note": "All four asked facts right — ν. 5110/2024, ανώνυμη εταιρεία, «ΕΛΚΑΚ ΑΕ», Υπουργός Εθνικής Άμυνας — each from άρθρο 3, which retrieval put at rank 1. V1 invented ν. 4914/2022 and a ΝΠΙΔ. The ν. 4548/2018 detail in 'expected' was not asked and is not penalised. Stable: runs 2–3 say the same."
+    },
+    "q02": {
+      "verdict": "partially_correct",
+      "cited": ["άρθρο έβδομο", "άρθρο πέμπτο παρ. 1 και άρθρο έβδομο", "άρθρο έβδομο του καταστατικού που κυρώθηκε με το άρθρο 13 ν. 5110/2024"],
+      "flags": ["unsupported_detail", "misattributed_act"],
+      "note": "The four asked figures are right (1.500.000 €, 1.500 μετοχές × 1.000 €, 67% / 33%) and supported by καταστατικό άρθρο έβδομο and ν. 5110/2024 άρθρο 5 παρ. 1, both in the sources. Two defects. (1) It adds amounts the provisions do not state, and gets them wrong: 1.008.000 € and 501.000 € (67% and 33% of 1.500.000 are 1.005.000 and 495.000). (2) «άρθρο πέμπτο παρ. 1» — the law's άρθρο 5 cited in the καταστατικό's spelled-out numbering; καταστατικό άρθρο πέμπτο exists and is about something else. That is V1 q03's numbering-system probe firing on a different question. Unstable: run 2 computes nothing (clean); run 3 computes correctly (1.005.000 / 495.000)."
+    },
+    "q03": {
+      "verdict": "refused",
+      "cited": ["άρθρο δέκατο πέμπτο παρ. 8", "άρθρο εικοστό έβδομο παρ. 1", "άρθρο δέκατο πέμπτο παρ. 11", "άρθρο δέκατο ένατο"],
+      "flags": ["unmarked_refusal"],
+      "note": "The right refusal for what it was given: καταστατικό άρθρο δέκατο πέμπτο παρ. 1 (7–9 μέλη, θητεία 5 ετών) is not among the sources — step 6 found it at rank 24 for this compound question. Retrieval failure, not generation. It correctly says παρ. 8 is about qualifications, not numbers, and invents nothing — V1 invented two laws here. The closing sentence is NOT_FOUND_ANSWER altered («…δεν απαντούν στην ερώτηση ως προς αυτά τα συγκεκριμένα στοιχεία»), so is_not_found misses it. The structural probe (άρθρο 15 vs άρθρο δέκατο πέμπτο) is still unmeasured — this time because retrieval failed first; see q02 for the same probe firing elsewhere. Stable: all three runs refuse."
+    },
+    "q04": {
+      "verdict": "partially_correct",
+      "cited": ["άρθρο 2"],
+      "flags": [],
+      "note": "Names the Κοινό Σώμα Πληροφορικής correctly, from the table-of-contents article (άρθρο 2, rank 1), quotes it, and says plainly that υπαγωγή and αποστολή are not in what it was given — rule 4's partial-answer path, obeyed. Retrieval failure: άρθρα 47–48 are not in the sources (step 6: the act name in the question pulls toward άρθρο 2; 47 at rank 11). The aside about «Κεντρικό», «Εθνικό» is a hedge, not a claim. Unstable — the worst instability in the run: run 3 asserts «υπάγεται στη Στρατιωτική Σχολή Αξιωματικών Σωμάτων» and invents an αποστολή (unsupported_detail; the law says Αρχηγός ΓΕΕΘΑ)."
+    },
+    "q05": {
+      "verdict": "correct",
+      "cited": ["άρθρο 58 παρ. 1"],
+      "flags": [],
+      "note": "Διεύθυνση Πληροφορικής ΓΕΕΘΑ and all seven duties α)–ζ), from άρθρο 58 παρ. 1 at rank 1. V1 refused and misquoted the question. The probe (topical fluency without the provision) cannot fire with the provision in context. Stable."
+    },
+    "q06": {
+      "verdict": "partially_correct",
+      "cited": ["ν. 5110/2024, άρθρο 63"],
+      "flags": [],
+      "note": "300 € is right and άρθρο 63 is the right amending provision — no fusion of the two law numbers, which was the V1 probe. But the fee lives in παρ. 14 of άρθρο 64 ν. 3978/2011, which άρθρο 63 adds; the answer never names the amended law, so half the citation 'expected' asks for is missing. That is V6's problem (amendment chains), recorded here so V6 has the case. Stable: run 2 quotes the inserted «14. …» text, still without naming ν. 3978/2011."
+    },
+    "q07": {
+      "verdict": "correct",
+      "cited": ["ν. 5110/2024, άρθρο 59"],
+      "flags": [],
+      "note": "Every part the probe asked to score separately is right: 90%, πλην Ν.Ι.Μ.Τ.Σ., 2012–2022, 106.850.551 €, one year, 10% written off. V1 claimed the law did not exist. Stable."
+    },
+    "q08": {
+      "verdict": "correct",
+      "cited": ["άρθρο 11 παρ. 1", "παρ. 2 και 3"],
+      "flags": ["spurious_refusal", "unsupported_detail"],
+      "note": "ο ανάδοχος, and the exclusion of the Διακρατικά Ολοκληρωμένα Προγράμματα survives — the second half of the probe, which the step 8 spot check had dropped. Two defects that do not change the verdict: it ends with a refusal sentence («Οι διατάξεις που εντοπίστηκαν δεν απαντούν στο ερώτημα της εξαίρεσης…») after having answered it; and it says the excluded programmes are governed by 'ειδικές διατάξεις που προβλέπονται στα αντίστοιχα προγράμματα', which nothing in the sources says (hedged, but a claim). Stable on the substance; runs 2–3 drift into άρθρο 8 παρ. 10 at the end."
+    },
+    "q09": {
+      "verdict": "partially_correct",
+      "cited": ["άρθρο 82", "άρθρο 61 παρ. 2"],
+      "flags": ["spurious_refusal", "unsupported_detail"],
+      "note": "The clearest generation failure in the run. άρθρο 82 is at rank 1 and the answer quotes it correctly — then concludes that άρθρο 61 παρ. 2 (1.1.2023) 'takes priority' for the commencement of the whole law. 61 παρ. 2 says «Η ισχύς του παρόντος» — that article only; 82's «εκτός αν άλλως ορίζεται σε επιμέρους διατάξεις» is exactly what makes room for it. A reader would come away believing the law has applied since before it was published. Opens with the refusal sentence although the right article was in hand. Scored partially_correct rather than fabricated because both citations are real and correctly located — the error is the reasoning, which the V1 vocabulary has no verdict for. Unstable: run 2 the same; run 3 gets it right (general rule 82, exception for 61)."
+    },
+    "q10": {
+      "verdict": "correct",
+      "cited": ["π.δ. 62/2025 (άρθρα 580 και 586)"],
+      "flags": [],
+      "note": "Expected outcome updated for V3 (decided 2026-11-16, see V3 note): 'nothing in ν. 5110/2024; π.δ. 62/2025 άρθρο 580 covers it'. That is what it says. The canary did not fire — all five sources are π.δ. 62/2025 and none was attributed to ν. 5110/2024. Stable in substance; run 3 appends NOT_FOUND_ANSWER verbatim after the correct answer (spurious_refusal there), which is_not_found reads as a refusal — so `poe ask` would hide the sources of a correct answer."
+    }
+  }
+}

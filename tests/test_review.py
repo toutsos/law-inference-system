@@ -1,8 +1,10 @@
+from typing import Any
+
 import pytest
 
 from experiments.baseline_no_rag.review import latest_run, render
 
-_A_RUN = {
+_A_RUN: dict[str, Any] = {
     "run": {
         "started_at": "2026-09-07T16:53:31+00:00",
         "finished_at": "2026-09-07T16:54:24+00:00",
@@ -167,3 +169,61 @@ def test_the_latest_run_is_the_newest_timestamp_not_the_first_listed(tmp_path) -
         (tmp_path / f"{stem}.json").write_text("{}", encoding="utf-8")
 
     assert latest_run(tmp_path).stem == "2026-09-07T16-53-31Z"
+
+
+@pytest.mark.parametrize(
+    "flag",
+    [
+        "unmarked_refusal",
+        "spurious_refusal",
+        "term_substitution",
+        "dropped_condition",
+        "misattributed_act",
+        "unsupported_detail",
+    ],
+)
+def test_the_step_9_flags_are_part_of_the_vocabulary(flag: str) -> None:
+    """Each flag agreed for the RAG run renders, and is counted in the summary.
+
+    The RAG annotation (V3 step 9) uses six flags V1 never needed. Catches one
+    missing from FLAGS: render() would refuse the whole annotation file, or —
+    if the check were loosened to get past it — the flag would go uncounted.
+    """
+    note = {"annotations": {"q01": {"verdict": "correct", "flags": [flag]}}}
+
+    sheet = render(_A_RUN, _THE_QUESTIONS, note, "a-run")
+
+    assert f"`{flag}` 1" in sheet
+
+
+def test_a_rag_answer_shows_the_sources_the_model_was_shown() -> None:
+    """A record with sources gets a «Sources» line listing each citation.
+
+    The reviewer scores an answer against what the model saw: an honest
+    refusal and a retrieval failure look identical without it. Catches the
+    sources being saved by run.py and then never reaching the sheet.
+    """
+    record = {
+        **_A_RUN["answers"][0],
+        "sources": ["ν. 5110/2024, άρθρο 3 παρ. 1", "ν. 5110/2024, άρθρο 3 παρ. 2"],
+    }
+    run = {**_A_RUN, "answers": [record]}
+
+    sheet = render(run, _THE_QUESTIONS, {}, "a-run")
+
+    assert (
+        "**Sources.** `ν. 5110/2024, άρθρο 3 παρ. 1` · `ν. 5110/2024, άρθρο 3 παρ. 2`"
+        in sheet
+    )
+
+
+def test_a_v1_record_without_a_sources_field_still_renders() -> None:
+    """The September V1 results file, which has no "sources" key, renders.
+
+    results/ files are never edited, so the old file will never gain the
+    field. Catches record["sources"] instead of .get(): the V1 sheet — the
+    other half of step 9's comparison — would crash with a KeyError.
+    """
+    sheet = render(_A_RUN, _THE_QUESTIONS, {}, "a-run")
+
+    assert "**Sources.**" not in sheet

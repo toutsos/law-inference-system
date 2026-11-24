@@ -2,9 +2,13 @@ import json
 from pathlib import Path
 
 from experiments.baseline_no_rag.run import QUESTIONS_FILE, ask, load_questions
+from greek_law.domain import ActIdentity, SourceReference
+from greek_law.embedding import EmbeddingUnavailableError
+from greek_law.ingestion.chunking import Chunk
 from greek_law.llm.errors import LLMTimeoutError
 from greek_law.llm.models import ChatResponse
-from tests.fakes import FakeLLMClient, FlakyLLMClient
+from greek_law.retrieval import DEFAULT_K, NoEmbeddingsError, RetrievedChunk
+from tests.fakes import FakeLLMClient, FakeRetriever, FlakyLLMClient
 
 _AN_ENTRY = {
     "id": "q01",
@@ -134,3 +138,94 @@ def test_the_questions_file_is_utf8_greek_not_escaped_ascii() -> None:
 
     assert "\\u" not in raw
     assert json.loads(raw)["questions"]
+
+
+def _hit(article: str, distance: float) -> RetrievedChunk:
+    return RetrievedChunk(
+        chunk=Chunk(
+            document_id="test_doc",
+            source=SourceReference(
+                act=ActIdentity(act_type="ν.", number="5110", year=2024),
+                article=article,
+                paragraph="1",
+            ),
+            text=f"Κείμενο του άρθρου {article}.",
+        ),
+        distance=distance,
+    )
+
+
+def test_a_rag_record_carries_the_citations_shown_to_the_model() -> None:
+    """With a retriever, the record stores each source's citation, nearest first.
+
+    Step 10 sorts every wrong answer into "retrieval failure" or "generation
+    failure" by asking one thing: was the right provision among the sources?
+    Catches a RAG run that saves only the answer text — the sources would be
+    gone, and the only record of what the model saw would be its own claims.
+    """
+    retriever = FakeRetriever([_hit("11", 0.34), _hit("12", 0.41)])
+
+    record = ask(_AN_ENTRY, FakeLLMClient(_A_RESPONSE), retriever)
+
+    assert record["sources"] == [
+        "ν. 5110/2024, άρθρο 11 παρ. 1",
+        "ν. 5110/2024, άρθρο 12 παρ. 1",
+    ]
+    assert retriever.calls == [(_AN_ENTRY["text"], DEFAULT_K)]
+
+
+def test_a_rag_record_is_stamped_with_the_grounded_prompt_version() -> None:
+    """A RAG record says prompt_version "v2"; a baseline record says "v1".
+
+    prompt_version is how the comparison tells the two runs' answers apart
+    inside the files. Catches the --rag path still calling answer_question:
+    the run would be labelled RAG, look plausible, and measure V1 again.
+    """
+    retriever = FakeRetriever([_hit("11", 0.34)])
+
+    rag = ask(_AN_ENTRY, FakeLLMClient(_A_RESPONSE), retriever)
+    baseline = ask(_AN_ENTRY, FakeLLMClient(_A_RESPONSE))
+
+    assert rag["prompt_version"] == "v2"
+    assert baseline["prompt_version"] == "v1"
+
+
+def test_a_baseline_record_has_an_empty_source_list() -> None:
+    """Without a retriever, sources is [] — present, and empty.
+
+    One record shape for both modes, so compare.py can read either run
+    without branching. Catches the field missing from baseline records (a
+    KeyError in the comparison) or filled with something the model never saw.
+    """
+    record = ask(_AN_ENTRY, FakeLLMClient(_A_RESPONSE))
+
+    assert record["sources"] == []
+
+
+def test_an_embedding_failure_becomes_a_record_instead_of_an_exception() -> None:
+    """Ollama's embedder going away mid-run is recorded, like an LLM failure.
+
+    The RAG run calls two models per question, so it has a second way to
+    fail. Catches ask() catching only LLMError: an EmbeddingError would
+    escape, abort the run, and throw away the answers already produced.
+    """
+    retriever = FakeRetriever(error=EmbeddingUnavailableError("Ollama went away"))
+
+    record = ask(_AN_ENTRY, FakeLLMClient(_A_RESPONSE), retriever)
+
+    assert record["error"] == "EmbeddingUnavailableError: Ollama went away"
+    assert record["id"] == "q01"
+
+
+def test_an_empty_store_becomes_a_record_instead_of_an_exception() -> None:
+    """NoEmbeddingsError (nothing loaded) is recorded, not raised.
+
+    Catches the same escape as above for the store being empty. Every record
+    would then carry the same error, which says plainly "run poe load" —
+    better than a traceback after the first question.
+    """
+    retriever = FakeRetriever(error=NoEmbeddingsError("run `poe load`"))
+
+    record = ask(_AN_ENTRY, FakeLLMClient(_A_RESPONSE), retriever)
+
+    assert record["error"] == "NoEmbeddingsError: run `poe load`"
